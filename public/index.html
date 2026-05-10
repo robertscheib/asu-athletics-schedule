@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASU Sun Devil Athletics Calendar</title>
+
+  <!-- FullCalendar -->
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header>
+  <div class="logo"><span>ASU</span><span class="logo-text"> Sun Devil Athletics</span></div>
+  <div class="header-controls">
+    <div class="view-toggle">
+      <button id="btn-calendar-view" class="active" onclick="setView('calendar')">Calendar</button>
+      <button id="btn-list-view" onclick="setView('list')">List</button>
+      <button id="btn-map-view" onclick="setView('map')">Map</button>
+    </div>
+    <button class="btn-filters-toggle" id="btn-filters" onclick="toggleFilters()">Filters</button>
+    <button class="btn-refresh" id="btn-refresh" onclick="triggerRefresh()">Refresh</button>
+  </div>
+</header>
+
+<div class="app-body">
+  <aside id="sidebar">
+    <div class="filter-group">
+      <label class="group-label">Sport</label>
+      <div class="sport-list" id="sport-list">
+        <em style="font-size:0.8rem;color:#999">Loading…</em>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">Game Type</label>
+      <div class="game-type-toggles" id="game-type-toggles">
+        <button data-type="home" onclick="toggleGameType(this)">Home</button>
+        <button data-type="away" onclick="toggleGameType(this)">Away</button>
+        <button data-type="neutral" onclick="toggleGameType(this)">Neutral</button>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">City</label>
+      <select id="filter-city" onchange="applyFilters()">
+        <option value="">All Cities</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">Region</label>
+      <select id="filter-region" onchange="toggleRegion(this)">
+        <option value="">All Regions</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">State</label>
+      <select id="filter-state" onchange="applyFilters()">
+        <option value="">All States</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">Date From</label>
+      <input type="date" id="filter-from" onchange="applyFilters()" />
+    </div>
+
+    <div class="filter-group">
+      <label class="group-label">Date To</label>
+      <input type="date" id="filter-to" onchange="applyFilters()" />
+    </div>
+
+    <button class="btn-clear-filters" onclick="clearFilters()">Clear All Filters</button>
+  </aside>
+
+  <main>
+    <div id="live-banner" hidden></div>
+    <div id="calendar-view">
+      <div id="calendar"></div>
+    </div>
+    <div id="list-view"></div>
+    <div id="map-view"></div>
+  </main>
+</div>
+
+<div id="status-bar">Loading events…</div>
+
+<!-- Event detail modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <img class="modal-opponent-logo" id="modal-logo" src="" alt="" style="display:none" />
+      <div class="modal-header-text">
+        <div class="modal-title" id="modal-title"></div>
+        <div class="modal-sport" id="modal-sport"></div>
+      </div>
+      <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script src="filters.js?v=4"></script>
+<script src="calendar.js?v=4"></script>
+<script src="map.js?v=1"></script>
+<script src="live.js?v=4"></script>
+
+</body>
+</html>

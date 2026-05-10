@@ -1,0 +1,347 @@
+// Global filter state
+const filters = {
+  sports: new Set(),
+  gameTypes: new Set(),
+  city: '',
+  region: '',
+  state: '',
+  from: '',
+  to: '',
+};
+
+const REGIONS = {
+  'Southwest':         ['Arizona', 'New Mexico', 'Texas', 'Oklahoma'],
+  'West':              ['California', 'Nevada', 'Utah', 'Colorado'],
+  'Pacific Northwest': ['Washington', 'Oregon', 'Idaho'],
+  'Midwest':           ['Illinois', 'Ohio', 'Indiana', 'Michigan', 'Wisconsin', 'Minnesota', 'Iowa', 'Missouri', 'Kansas', 'Nebraska', 'North Dakota', 'South Dakota'],
+  'Southeast':         ['Florida', 'Georgia', 'Alabama', 'Mississippi', 'Tennessee', 'South Carolina', 'North Carolina', 'Virginia', 'Kentucky', 'Arkansas', 'Louisiana'],
+  'Northeast':         ['New York', 'Pennsylvania', 'New Jersey', 'Connecticut', 'Massachusetts', 'Rhode Island', 'Vermont', 'New Hampshire', 'Maine', 'Maryland', 'Delaware', 'District of Columbia', 'West Virginia'],
+  'Mountain':          ['Montana', 'Wyoming', 'Idaho'],
+  'Hawaii/Alaska':     ['Hawaii', 'Alaska'],
+};
+
+let allLocations = [];
+
+// Sport color palette — cycles through these
+const SPORT_COLORS = [
+  '#8C1D40', '#C0392B', '#27AE60', '#2980B9', '#8E44AD',
+  '#D35400', '#16A085', '#2C3E50', '#E74C3C', '#1ABC9C',
+  '#F39C12', '#6C3483', '#1F618D', '#117A65', '#7D6608',
+];
+const sportColorMap = {};
+let colorIdx = 0;
+
+function sportColor(sport) {
+  if (!sport) return '#8C1D40';
+  if (!sportColorMap[sport]) {
+    sportColorMap[sport] = SPORT_COLORS[colorIdx % SPORT_COLORS.length];
+    colorIdx++;
+  }
+  return sportColorMap[sport];
+}
+
+async function loadFilterOptions() {
+  const [sports, locations] = await Promise.all([
+    fetch('/api/sports').then(r => r.json()),
+    fetch('/api/locations').then(r => r.json()),
+  ]);
+
+  allLocations = locations;
+
+  // Sport checkboxes
+  const list = document.getElementById('sport-list');
+  list.innerHTML = '';
+  for (const sport of sports) {
+    const color = sportColor(sport);
+    const id = `sport-${sport.replace(/\W/g, '_')}`;
+    const label = document.createElement('label');
+    label.innerHTML = `
+      <input type="checkbox" id="${id}" value="${sport}" onchange="toggleSport(this)" />
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${sport}
+    `;
+    list.appendChild(label);
+  }
+
+  // City dropdown
+  const citySelect = document.getElementById('filter-city');
+  const cities = [...new Set(locations.map(l => l.city).filter(Boolean))].sort();
+  cities.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    citySelect.appendChild(opt);
+  });
+
+  // Region dropdown — only show regions that have at least one event location
+  const regionSelect = document.getElementById('filter-region');
+  const locationStates = new Set(locations.map(l => l.state).filter(Boolean));
+  for (const [regionName, states] of Object.entries(REGIONS)) {
+    if (states.some(s => locationStates.has(s))) {
+      const opt = document.createElement('option');
+      opt.value = regionName;
+      opt.textContent = regionName;
+      regionSelect.appendChild(opt);
+    }
+  }
+
+  // State dropdown
+  rebuildStateDropdown('');
+}
+
+function rebuildStateDropdown(region) {
+  const stateSelect = document.getElementById('filter-state');
+  const prevState = stateSelect.value;
+  stateSelect.innerHTML = '<option value="">All States</option>';
+
+  let states = [...new Set(allLocations.map(l => l.state).filter(Boolean))].sort();
+  if (region && REGIONS[region]) {
+    const regionSet = new Set(REGIONS[region]);
+    states = states.filter(s => regionSet.has(s));
+  }
+
+  states.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    stateSelect.appendChild(opt);
+  });
+
+  // Restore prior selection only if it's still in the narrowed list
+  if (prevState && states.includes(prevState)) stateSelect.value = prevState;
+}
+
+function toggleRegion(select) {
+  filters.region = select.value;
+  // Clear state selection if it no longer belongs to the new region
+  if (filters.region && REGIONS[filters.region]) {
+    const regionSet = new Set(REGIONS[filters.region]);
+    if (filters.state && !regionSet.has(filters.state)) {
+      filters.state = '';
+    }
+  }
+  rebuildStateDropdown(filters.region);
+  applyFilters();
+}
+
+function toggleSport(checkbox) {
+  if (checkbox.checked) filters.sports.add(checkbox.value);
+  else filters.sports.delete(checkbox.value);
+  applyFilters();
+}
+
+function toggleGameType(btn) {
+  const type = btn.dataset.type;
+  if (btn.classList.contains('active')) {
+    btn.classList.remove('active');
+    filters.gameTypes.delete(type);
+  } else {
+    btn.classList.add('active');
+    filters.gameTypes.add(type);
+  }
+  applyFilters();
+}
+
+function applyFilters() {
+  filters.city = document.getElementById('filter-city').value;
+  filters.region = document.getElementById('filter-region').value;
+  filters.state = document.getElementById('filter-state').value;
+  filters.from = document.getElementById('filter-from').value;
+  filters.to = document.getElementById('filter-to').value;
+  window.reloadEvents && window.reloadEvents();
+}
+
+function clearFilters() {
+  filters.sports.clear();
+  filters.gameTypes.clear();
+  filters.city = '';
+  filters.region = '';
+  filters.state = '';
+  filters.from = '';
+  filters.to = '';
+
+  document.querySelectorAll('#sport-list input[type=checkbox]').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.game-type-toggles button').forEach(b => b.classList.remove('active'));
+  document.getElementById('filter-city').value = '';
+  document.getElementById('filter-region').value = '';
+  document.getElementById('filter-from').value = '';
+  document.getElementById('filter-to').value = '';
+  rebuildStateDropdown('');
+
+  window.reloadEvents && window.reloadEvents();
+}
+
+function buildQueryString() {
+  const params = new URLSearchParams();
+  if (filters.sports.size === 1) params.set('sport', [...filters.sports][0]);
+  if (filters.gameTypes.size === 1) params.set('game_type', [...filters.gameTypes][0]);
+  if (filters.city) params.set('city', filters.city);
+  if (filters.region) params.set('region', filters.region);
+  if (filters.state) params.set('state', filters.state);
+  if (filters.from) params.set('from', Math.floor(new Date(filters.from).getTime() / 1000));
+  if (filters.to) params.set('to', Math.floor(new Date(filters.to + 'T23:59:59').getTime() / 1000));
+  return params.toString();
+}
+
+async function fetchEvents() {
+  const qs = buildQueryString();
+  const all = await fetch(`/api/events${qs ? '?' + qs : ''}`).then(r => r.json());
+
+  // Client-side multi-sport / multi-game-type filtering (API only supports single value)
+  return all.filter(e => {
+    if (filters.sports.size > 1 && !filters.sports.has(e.sport)) return false;
+    if (filters.gameTypes.size > 1 && !filters.gameTypes.has(e.game_type)) return false;
+    return true;
+  });
+}
+
+// ── Modal ──────────────────────────────────────────────
+
+function formatTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', timeZone:'America/Phoenix' });
+}
+
+function openEventModal(event) {
+  document.getElementById('modal-title').textContent = event.title || 'Event';
+  document.getElementById('modal-sport').textContent = [event.sport, event.event_type].filter(Boolean).join(' · ');
+
+  const logo = document.getElementById('modal-logo');
+  if (event.opponent_logo) {
+    logo.src = event.opponent_logo;
+    logo.style.display = '';
+  } else {
+    logo.style.display = 'none';
+  }
+
+  const body = document.getElementById('modal-body');
+  const rows = [];
+
+  const liveGame = window.__liveData?.[event.id];
+  if (liveGame) {
+    rows.push(row('🔴', 'Live', `<span class="live-badge-modal">LIVE</span> <strong>${liveGame.asuScore}–${liveGame.oppScore}</strong> <span class="live-situation">${liveGame.situation}</span>`));
+  } else if (event.result) {
+    const scoreClass = event.result === 'W' ? 'score-w' : event.result === 'L' ? 'score-l' : 'score-t';
+    const label = event.result === 'W' ? 'Win' : event.result === 'L' ? 'Loss' : 'Tie';
+    rows.push(row('🏆', 'Result', `<span class="score-badge ${scoreClass}">${event.result} ${event.asu_score}–${event.opp_score}</span> <span style="color:var(--text-muted);font-size:0.8rem">${label}</span>`));
+  }
+
+  rows.push(row('📅', 'When', formatTs(event.start_date) + (event.end_date && event.end_date !== event.start_date ? ` – ${formatTs(event.end_date)}` : '')));
+
+  if (event.location_name || event.venue_address) {
+    rows.push(row('📍', 'Venue', [event.location_name, event.venue_address].filter(Boolean).join('<br/>')));
+  }
+  if (event.city || event.state) {
+    rows.push(row('🏙️', 'Location', [event.city, event.state].filter(Boolean).join(', ')));
+  }
+  if (event.game_type) {
+    rows.push(row('🏟️', 'Type', capitalize(event.game_type)));
+  }
+  if (event.tv_network) {
+    rows.push(row('📺', 'TV', event.tv_network));
+  }
+  if (event.season) {
+    rows.push(row('📆', 'Season', event.season));
+  }
+  if (event.badges) {
+    const badges = event.badges.split('|').filter(Boolean).map(b => `<span class="badge">${b.trim()}</span>`).join(' ');
+    rows.push(row('⭐', 'Promotions', badges));
+  }
+
+  let actions = '';
+  if (event.ticket_url) {
+    actions += `<a class="modal-ticket-btn" href="${event.ticket_url}" target="_blank" rel="noopener">${event.ticket_label || 'Get Tickets'}</a>`;
+  }
+  if (event.node_url) {
+    const href = event.node_url.startsWith('http') ? event.node_url : `https://sundevils.com${event.node_url}`;
+    actions += `<a class="modal-event-link" href="${href}" target="_blank" rel="noopener">Event page ↗</a>`;
+  }
+
+  body.innerHTML = rows.join('') + actions;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function row(icon, label, value) {
+  return `<div class="modal-row"><span class="modal-row-icon">${icon}</span><span class="modal-row-label">${label}</span><span class="modal-row-value">${value}</span></div>`;
+}
+
+function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModalDirect();
+}
+
+function closeModalDirect() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalDirect(); });
+
+// ── Refresh ────────────────────────────────────────────
+
+async function triggerRefresh() {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.textContent = 'Refreshing…';
+  try {
+    const res = await fetch('/api/refresh', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = `Done (${data.count} events)`;
+      window.reloadEvents && window.reloadEvents();
+      loadFilterOptions();
+    } else {
+      btn.textContent = 'Error';
+    }
+  } catch {
+    btn.textContent = 'Error';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Refresh'; }, 3000);
+}
+
+// ── Filters toggle (mobile) ────────────────────────────
+
+function toggleFilters() {
+  const sidebar = document.getElementById('sidebar');
+  const btn = document.getElementById('btn-filters');
+  const isOpen = sidebar.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+}
+
+// ── View toggle ────────────────────────────────────────
+
+function setView(view) {
+  const calView  = document.getElementById('calendar-view');
+  const listView = document.getElementById('list-view');
+  const mapView  = document.getElementById('map-view');
+  const btnCal   = document.getElementById('btn-calendar-view');
+  const btnList  = document.getElementById('btn-list-view');
+  const btnMap   = document.getElementById('btn-map-view');
+
+  // Always use explicit 'none'/'block' so inline styles override any CSS display:none
+  calView.style.display  = 'none';
+  listView.style.display = 'none';
+  mapView.style.display  = 'none';
+  [btnCal, btnList, btnMap].forEach(b => b && b.classList.remove('active'));
+
+  if (view === 'calendar') {
+    calView.style.display = 'block';
+    btnCal.classList.add('active');
+    window.__calendar && window.__calendar.updateSize();
+  } else if (view === 'map') {
+    mapView.style.display = 'block';
+    btnMap && btnMap.classList.add('active');
+    window.renderMapView && window.renderMapView();
+  } else {
+    listView.style.display = 'block';
+    btnList.classList.add('active');
+    window.renderListView && window.renderListView();
+  }
+
+  localStorage.setItem('asu-cal-view', view);
+}
+
+// Init
+loadFilterOptions();
+const savedView = localStorage.getItem('asu-cal-view') || 'calendar';
+if (savedView === 'list') setView('list');
+else if (savedView === 'map') setView('map');
