@@ -1345,3 +1345,80 @@ main {
   .bracket-rounds { overflow-x: auto; }
   .bracket-round  { min-width: 160px; }
 }
+
+/* ── Upcoming tournament schedule list ───────────────────────────────────── */
+
+.tourn-note {
+  padding: 10px 16px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.tourn-game-list {
+  padding: 8px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tourn-game-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.tourn-game-row:last-child { border-bottom: none; }
+
+.tourn-game-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tourn-game-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  text-align: right;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tourn-opp  { color: var(--text); }
+.tourn-date { color: var(--text-muted); }
+.tourn-time { color: var(--text-muted); white-space: nowrap; }
+.tourn-tv   { color: var(--text-muted); }
+
+.tourn-result-w {
+  display: inline-block;
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tourn-result-l {
+  display: inline-block;
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.25);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

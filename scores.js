@@ -342,7 +342,7 @@ function buildSeriesTournament(group, summaries) {
     return { ...g, gameNumber: series?.gameNumber ?? null, maxGames: series?.maxGames ?? null };
   }).sort((a, b) => (a.gameNumber ?? 999) - (b.gameNumber ?? 999) || a.startTime - b.startTime);
 
-  return { ...group, format: 'series', rounds: [], standings: [], seriesGames };
+  return { ...group, format: 'series', rounds: [], standings: [], seriesGames, bracketReady: true };
 }
 
 async function fetchPoolStandings(espnPath) {
@@ -394,7 +394,7 @@ async function buildTournaments(games) {
     const cfg = ALL_LIVE_CONFIGS.find(c => c.dbSport === group.sport);
     if (!cfg) {
       console.warn(`[live] No ESPN config for sport ${group.sport}, using inferred bracket`);
-      results.push({ ...group, format: 'bracket', rounds: inferRounds(group.games), standings: [], seriesGames: [] });
+      results.push({ ...group, format: 'bracket', rounds: inferRounds(group.games), standings: [], seriesGames: [], bracketReady: true });
       continue;
     }
 
@@ -432,7 +432,7 @@ async function buildTournaments(games) {
       console.error(`[live] Pool standings fetch failed for ${group.sport}:`, err.message);
     }
     if (standings && standings.length > 0) {
-      results.push({ ...group, format: 'pool', rounds: [], standings, seriesGames: [] });
+      results.push({ ...group, format: 'pool', rounds: [], standings, seriesGames: [], bracketReady: true });
       continue;
     }
 
@@ -441,7 +441,7 @@ async function buildTournaments(games) {
       ? buildBracketRoundsFromSummaries(group, summaries)
       : inferRounds(group.games);
 
-    results.push({ ...group, format: 'bracket', rounds, standings: [], seriesGames: [] });
+    results.push({ ...group, format: 'bracket', rounds, standings: [], seriesGames: [], bracketReady: true });
   }
 
   return results;
@@ -517,7 +517,7 @@ async function detectActiveTournaments() {
 
     const cfg = ALL_LIVE_CONFIGS.find(c => c.dbSport === group.sport);
     if (!cfg) {
-      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games });
+      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games, bracketReady: false });
       continue;
     }
 
@@ -528,11 +528,11 @@ async function detectActiveTournaments() {
       console.error(`[live] DB-detected pool fetch failed for ${group.sport}:`, err.message);
     }
     if (standings && standings.length > 0) {
-      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'pool', rounds: [], standings, seriesGames: [], games });
+      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'pool', rounds: [], standings, seriesGames: [], games, bracketReady: false });
       continue;
     }
 
-    results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games });
+    results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games, bracketReady: false });
   }
 
   return results;
