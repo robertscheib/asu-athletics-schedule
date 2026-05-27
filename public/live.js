@@ -272,12 +272,162 @@ function chipRow(chips) {
 // ── Tournament section ────────────────────────────────────────────────────────
 
 function renderTournaments(tournaments) {
-  return tournaments.map(t => `
-    <div class="bracket-section">
-      ${sectionHeader(`🏆 ${esc(t.name)}`)}
-      <div class="live-cards-grid">${t.games.map(renderGameCard).join('')}</div>
-    </div>`
-  ).join('');
+  if (!tournaments || !tournaments.length) return '';
+  return tournaments.map(t => {
+    if (t.format === 'pool') return renderPoolStandings(t);
+    if (t.format === 'series') return renderSeriesPanel(t);
+    if (t.format === 'bracket' && t.rounds && t.rounds.length) return renderBracket(t);
+    // Fallback: flat game cards (unknown format or empty rounds)
+    return `<div class="bracket-wrapper">
+      <div class="live-section-header bracket-collapsible-header" onclick="toggleBracketBody(this)">
+        🏆 ${esc(t.name)} <span class="bracket-collapse-btn">▾</span>
+      </div>
+      <div class="bracket-body">
+        <div class="live-cards-grid">${(t.games || []).map(renderGameCard).join('')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleBracketBody(headerEl) {
+  const body = headerEl.nextElementSibling;
+  if (!body) return;
+  const collapsed = body.classList.toggle('collapsed');
+  const btn = headerEl.querySelector('.bracket-collapse-btn');
+  if (btn) btn.classList.toggle('rotated', collapsed);
+}
+
+function renderBracket(tournament) {
+  const colId = `bb-${tournament.id.replace(/[^a-z0-9]/gi, '-')}`;
+  const roundsHtml = tournament.rounds.map(round => `
+    <div class="bracket-round">
+      <div class="bracket-round-label">${esc(round.name)}</div>
+      ${(round.matchups || []).map(m => renderMatchup(m)).join('')}
+    </div>`).join('');
+
+  return `
+    <div class="bracket-wrapper">
+      <div class="live-section-header bracket-collapsible-header" onclick="toggleBracketBody(this)">
+        🏆 ${esc(tournament.name)} <span class="bracket-collapse-btn">▾</span>
+      </div>
+      <div class="bracket-body" id="${esc(colId)}">
+        <div class="bracket-rounds">${roundsHtml}</div>
+      </div>
+    </div>`;
+}
+
+function renderMatchup(m) {
+  const liveClass = m.state === 'in' ? ' bm-live' : '';
+  const teamA = m.teamA || { name: 'TBD', abbr: 'TBD', logo: null, seed: null, score: null, winner: null, isASU: false };
+  const teamB = m.teamB || { name: 'TBD', abbr: 'TBD', logo: null, seed: null, score: null, winner: null, isASU: false };
+  const timeOrSituation = m.state === 'in' && m.situation
+    ? `<div class="bracket-situation">${esc(m.situation)}</div>`
+    : m.state === 'pre' && m.startTime
+    ? `<div class="bracket-situation">${esc(formatGameTime(m.startTime))}</div>`
+    : '';
+
+  return `
+    <div class="bracket-matchup${liveClass}">
+      ${renderBracketTeam(teamA, m.state)}
+      ${renderBracketTeam(teamB, m.state)}
+      ${timeOrSituation}
+    </div>`;
+}
+
+function renderBracketTeam(team, state) {
+  const winnerClass = team.winner === true ? ' bt-winner' : '';
+  const loserClass  = team.winner === false ? ' bt-loser' : '';
+  const asuClass    = team.isASU ? ' bt-asu' : '';
+
+  const seedHtml = team.seed != null
+    ? `<span class="bracket-seed">${esc(team.seed)}</span>`
+    : `<span class="bracket-seed"></span>`;
+
+  const logoHtml = team.logo
+    ? `<img class="bracket-team-logo" src="${esc(team.logo)}" alt="" loading="lazy">`
+    : `<span class="bracket-team-abbr">${esc((team.abbr || team.name || 'TBD').slice(0, 3).toUpperCase())}</span>`;
+
+  const scoreHtml = state !== 'pre' && team.score != null
+    ? `<span class="bracket-team-score">${esc(team.score)}</span>` : '';
+
+  const liveBadge = state === 'in'
+    ? `<span class="bracket-live-badge">LIVE</span>` : '';
+
+  return `<div class="bracket-team${winnerClass}${loserClass}${asuClass}">
+    ${seedHtml}${logoHtml}
+    <span class="bracket-team-name">${esc(shortOppName(team.name || 'TBD'))}</span>
+    ${scoreHtml}${liveBadge}
+  </div>`;
+}
+
+function renderPoolStandings(tournament) {
+  const colId = `ps-${tournament.id.replace(/[^a-z0-9]/gi, '-')}`;
+  const rows = (tournament.standings || []).map(s => `
+    <tr class="${s.isASU ? 'standings-asu-row' : ''}">
+      <td>${esc(s.rank)}</td>
+      <td>
+        ${s.logo ? `<img class="bracket-team-logo" src="${esc(s.logo)}" alt="" loading="lazy"> ` : ''}${esc(s.name)}
+      </td>
+      <td>${esc(s.w)}</td>
+      <td>${esc(s.l)}</td>
+      <td>${esc(s.pct)}</td>
+      <td>${esc(s.gb)}</td>
+    </tr>`).join('');
+
+  const gamesHtml = (tournament.games || []).length
+    ? `<div class="live-cards-grid" style="padding:12px 16px 16px">${tournament.games.map(renderGameCard).join('')}</div>` : '';
+
+  return `
+    <div class="bracket-wrapper">
+      <div class="live-section-header bracket-collapsible-header" onclick="toggleBracketBody(this)">
+        🏆 ${esc(tournament.name)} — Pool Standings <span class="bracket-collapse-btn">▾</span>
+      </div>
+      <div class="bracket-body" id="${esc(colId)}">
+        <table class="standings-table">
+          <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>Pct</th><th>GB</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${gamesHtml}
+      </div>
+    </div>`;
+}
+
+function renderSeriesPanel(tournament) {
+  const colId = `sp-${tournament.id.replace(/[^a-z0-9]/gi, '-')}`;
+  const seriesGames = tournament.seriesGames || tournament.games || [];
+  const asuWins  = seriesGames.filter(g => g.state === 'final' && g.asuWinner === true).length;
+  const oppWins  = seriesGames.filter(g => g.state === 'final' && g.asuWinner === false).length;
+  const oppName  = seriesGames[0]?.oppName || 'Opponent';
+
+  const dots = seriesGames.map(g => {
+    if (g.state === 'pre') return `<span class="series-dot sd-tbd" title="TBD"></span>`;
+    if (g.state === 'live') return `<span class="series-dot sd-tbd" title="Live"></span>`;
+    return g.asuWinner === true
+      ? `<span class="series-dot sd-win" title="W"></span>`
+      : `<span class="series-dot sd-loss" title="L"></span>`;
+  }).join('');
+
+  let seriesScoreText = '';
+  const played = asuWins + oppWins;
+  if (played > 0) {
+    if (asuWins > oppWins)      seriesScoreText = `ASU leads ${asuWins}–${oppWins}`;
+    else if (oppWins > asuWins) seriesScoreText = `${esc(shortOppName(oppName))} leads ${oppWins}–${asuWins}`;
+    else                        seriesScoreText = `Tied ${asuWins}–${asuWins}`;
+  }
+
+  return `
+    <div class="bracket-wrapper">
+      <div class="live-section-header bracket-collapsible-header" onclick="toggleBracketBody(this)">
+        🏆 ${esc(tournament.name)} <span class="bracket-collapse-btn">▾</span>
+      </div>
+      <div class="bracket-body" id="${esc(colId)}">
+        <div class="series-panel">
+          <div class="series-dots">${dots}</div>
+          ${seriesScoreText ? `<div class="series-score">${seriesScoreText}</div>` : ''}
+        </div>
+        <div class="live-cards-grid" style="padding:0 16px 16px">${seriesGames.map(renderGameCard).join('')}</div>
+      </div>
+    </div>`;
 }
 
 // ── Next game countdown block ─────────────────────────────────────────────────

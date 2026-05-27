@@ -1123,3 +1123,225 @@ main {
     font-size: 1.6rem;
   }
 }
+
+/* ── Bracket / Pool / Series ─────────────────────────────────────────────── */
+
+.bracket-wrapper {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.bracket-collapsible-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bracket-collapsible-header:hover { opacity: 0.9; }
+
+.bracket-collapse-btn {
+  font-size: 1rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.bracket-collapse-btn.rotated { transform: rotate(-90deg); }
+
+.bracket-body { /* visible by default */ }
+.bracket-body.collapsed { display: none; }
+
+/* Bracket rounds */
+
+.bracket-rounds {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  padding: 16px;
+}
+
+.bracket-round {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  flex: 1;
+  padding-right: 16px;
+}
+
+.bracket-round:last-child { padding-right: 0; }
+
+.bracket-round-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--gold);
+  margin-bottom: 10px;
+}
+
+.bracket-matchup {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  margin-bottom: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.bracket-matchup.bm-live {
+  border-color: var(--maroon);
+  animation: bm-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes bm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(140, 29, 64, 0.3); }
+  50%       { box-shadow: 0 0 0 5px rgba(140, 29, 64, 0); }
+}
+
+.bracket-team {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  border-left: 3px solid transparent;
+  min-height: 32px;
+}
+
+.bracket-team + .bracket-team { border-top: 1px solid var(--border); }
+
+.bracket-team.bt-winner { font-weight: 700; }
+.bracket-team.bt-loser  { opacity: 0.5; }
+
+.bracket-team.bt-asu { border-left-color: var(--maroon); }
+.bracket-team.bt-asu.bt-winner {
+  border-left-color: var(--gold);
+  background: rgba(255, 198, 39, 0.1);
+}
+
+.bracket-seed {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 14px;
+  text-align: right;
+}
+
+.bracket-team-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.bracket-team-abbr {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.bracket-team-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bracket-team-score {
+  font-weight: 700;
+  min-width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.bracket-live-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #fff;
+  background: #c00;
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+
+.bracket-situation {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding: 2px 8px 4px;
+  border-top: 1px solid var(--border);
+}
+
+/* Pool standings */
+
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.standings-table th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.standings-asu-row {
+  background: rgba(140, 29, 64, 0.07);
+  font-weight: 600;
+}
+
+/* Series panel */
+
+.series-panel {
+  padding: 12px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.series-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.series-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.series-dot.sd-win  { background: #22c55e; }
+.series-dot.sd-loss { background: #ef4444; }
+.series-dot.sd-tbd  { background: var(--border); }
+
+.series-score {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .bracket-rounds { overflow-x: auto; }
+  .bracket-round  { min-width: 160px; }
+}

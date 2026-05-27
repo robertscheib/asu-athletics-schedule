@@ -96,7 +96,7 @@ app.post('/api/refresh', adminLimit, async (req, res) => {
 
 app.get('/api/live', liveLimit, async (req, res) => {
   try {
-    const games = await fetchLiveGames();
+    const { games, tournaments } = await fetchLiveGames();
     const nowTs = Math.floor(Date.now() / 1000);
     const nextRow = queryEvents({ from: nowTs })[0] ?? null;
     const nextGame = nextRow ? {
@@ -109,7 +109,7 @@ app.get('/api/live', liveLimit, async (req, res) => {
       gameType: nextRow.game_type,
       opponent_logo: nextRow.opponent_logo,
     } : null;
-    res.json({ games, tournaments: [], nextGame });
+    res.json({ games, tournaments, nextGame });
   } catch (err) {
     console.error('[api] /api/live error:', err.message);
     res.status(500).json({ error: err.message });
