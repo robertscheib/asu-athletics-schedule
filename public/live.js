@@ -280,19 +280,69 @@ function chipRow(chips) {
 function renderTournaments(tournaments) {
   if (!tournaments || !tournaments.length) return '';
   return tournaments.map(t => {
+    if (!t.bracketReady) return renderUpcomingTournament(t);
     if (t.format === 'pool') return renderPoolStandings(t);
     if (t.format === 'series') return renderSeriesPanel(t);
     if (t.format === 'bracket' && t.rounds && t.rounds.length) return renderBracket(t);
-    // Fallback: flat game cards (unknown format or empty rounds)
-    return `<div class="bracket-wrapper">
+    return renderUpcomingTournament(t);
+  }).join('');
+}
+
+function renderUpcomingTournament(tournament) {
+  const VENUE_RE = /ncaa|regional|championship|west\s+regional|east\s+regional|north\s+regional|south\s+regional|midwest\s+regional/i;
+  const games = tournament.games || [];
+  const nowTs = Math.floor(Date.now() / 1000);
+
+  const rows = games.map(g => {
+    const oppDisplay = (!g.oppName || VENUE_RE.test(g.oppName)) ? 'TBD' : shortOppName(g.oppName);
+
+    const dateStr = g.startTime
+      ? new Date(g.startTime * 1000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Phoenix' })
+      : '';
+    const timeStr = g.startTime
+      ? new Date(g.startTime * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix' }) + ' MST'
+      : '';
+
+    let resultChip = '';
+    if (g.state === 'final' && g.asuScore != null) {
+      const wl = g.asuWinner ? 'W' : 'L';
+      const cls = g.asuWinner ? 'tourn-result-w' : 'tourn-result-l';
+      resultChip = `<span class="${cls}">${wl} ${esc(g.asuScore)}–${esc(g.oppScore)}</span>`;
+    }
+
+    const tvHtml = g.tvNetwork ? `<span class="tourn-tv">📺 ${esc(g.tvNetwork)}</span>` : '';
+
+    return `
+      <div class="tourn-game-row">
+        <div class="tourn-game-left">
+          <span class="tourn-opp">${esc(oppDisplay)}</span>
+          ${resultChip}
+        </div>
+        <div class="tourn-game-right">
+          ${dateStr ? `<span class="tourn-date">${esc(dateStr)}</span>` : ''}
+          ${timeStr ? `<span class="tourn-time">${esc(timeStr)}</span>` : ''}
+          ${tvHtml}
+        </div>
+      </div>`;
+  }).join('');
+
+  const allFuture = games.length > 0 && games.every(g => g.startTime > nowTs);
+  const note = allFuture
+    ? `<div class="tourn-note">🗓 Schedule confirmed · Bracket releases when tournament begins</div>`
+    : `<div class="tourn-note">🏆 Tournament in progress · Live bracket updates when games start</div>`;
+
+  const colId = `ut-${(tournament.id || '').replace(/[^a-z0-9]/gi, '-')}`;
+
+  return `
+    <div class="bracket-wrapper">
       <div class="live-section-header bracket-collapsible-header" onclick="toggleBracketBody(this)">
-        🏆 ${esc(t.name)} <span class="bracket-collapse-btn">▾</span>
+        🏆 ${esc(tournament.name)} <span class="bracket-collapse-btn">▾</span>
       </div>
-      <div class="bracket-body">
-        <div class="live-cards-grid">${(t.games || []).map(renderGameCard).join('')}</div>
+      <div class="bracket-body" id="${esc(colId)}">
+        ${note}
+        <div class="tourn-game-list">${rows || '<div class="tourn-note">No games found</div>'}</div>
       </div>
     </div>`;
-  }).join('');
 }
 
 function toggleBracketBody(headerEl) {
