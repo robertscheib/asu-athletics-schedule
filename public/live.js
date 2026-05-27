@@ -88,16 +88,22 @@ function _renderLiveView(games, tournaments, nextGame) {
       html += sectionHeader("Today's Results");
       html += `<div class="live-cards-grid">${finalGames.map(renderGameCard).join('')}</div>`;
     }
+    if (tournaments.length > 0) html += renderTournaments(tournaments);
     if (soonest.startTime) startCountdown('live-countdown', soonest.startTime);
 
   } else if (finalGames.length > 0) {
     html += sectionHeader("Today's Results");
     html += `<div class="live-cards-grid">${finalGames.map(renderGameCard).join('')}</div>`;
+    if (tournaments.length > 0) html += renderTournaments(tournaments);
     if (nextGame) html += renderNextGameBlock(nextGame);
 
   } else if (nextGame) {
     html += `<p class="live-no-games-msg">No games in progress right now.</p>`;
+    if (tournaments.length > 0) html += renderTournaments(tournaments);
     html += renderNextGameBlock(nextGame);
+
+  } else if (tournaments.length > 0) {
+    html += renderTournaments(tournaments);
 
   } else {
     html += `
@@ -433,11 +439,14 @@ function renderSeriesPanel(tournament) {
 // ── Next game countdown block ─────────────────────────────────────────────────
 
 function renderNextGameBlock(nextGame) {
+  const tournamentPill = nextGame.isTournament
+    ? ` <span style="display:inline-block;font-size:0.72rem;background:var(--gold);color:#000;border-radius:4px;padding:1px 7px;font-weight:700;vertical-align:middle">🏆 Tournament</span>`
+    : '';
   return `
     <div class="live-next-game">
       <div class="live-next-label">Next Game</div>
       <div class="live-next-title">${esc(shortTitle(nextGame.title))}</div>
-      <div class="live-next-sport">${esc(nextGame.sport)}</div>
+      <div class="live-next-sport">${esc(nextGame.sport)}${tournamentPill}</div>
       <div class="live-next-countdown" id="next-countdown">–</div>
       <div class="live-next-meta">
         ${nextGame.startTime ? `<span>${esc(formatGameDateTime(nextGame.startTime))}</span>` : ''}

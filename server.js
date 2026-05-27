@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const { queryEvents, getSports, getLocations } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
-const { fetchLiveGames } = require('./scores');
+const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
 const { startScheduler } = require('./scheduler');
 
 const app = express();
@@ -108,6 +108,9 @@ app.get('/api/live', liveLimit, async (req, res) => {
       tvNetwork: nextRow.tv_network,
       gameType: nextRow.game_type,
       opponent_logo: nextRow.opponent_logo,
+      isTournament: TOURNAMENT_RE.test(nextRow.title || '') ||
+                    TOURNAMENT_RE.test(nextRow.badges || '') ||
+                    TOURNAMENT_RE.test(nextRow.location_name || ''),
     } : null;
     res.json({ games, tournaments, nextGame });
   } catch (err) {

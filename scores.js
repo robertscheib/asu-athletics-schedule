@@ -447,6 +447,97 @@ async function buildTournaments(games) {
   return results;
 }
 
+async function detectActiveTournaments() {
+  const nowTs = Math.floor(Date.now() / 1000);
+  const candidates = queryEvents({ from: nowTs - 86400, to: nowTs + 14 * 86400 })
+    .filter(e =>
+      TOURNAMENT_RE.test(e.title || '') ||
+      TOURNAMENT_RE.test(e.badges || '') ||
+      TOURNAMENT_RE.test(e.location_name || '')
+    );
+
+  if (!candidates.length) return [];
+
+  function deriveTournamentName(sport, event) {
+    const text = `${event.title || ''} ${event.badges || ''} ${event.location_name || ''}`;
+    const m = text.match(/ncaa\s+(?:super\s+regional|regional|tournament|championship)|super\s+regional|college\s+world\s+series|regional|championship|tournament/i);
+    return m ? m[0].replace(/\s+/g, ' ').trim() : `${sport} Tournament`;
+  }
+
+  function oppNameFromTitle(title) {
+    if (!title) return 'Opponent';
+    const clean = title.replace(/^[^:]+:\s*/i, '');
+    const vsM = clean.match(/arizona\s+state\s+vs\.?\s+(.+)/i);
+    if (vsM) return vsM[1].trim();
+    const asuAtM = clean.match(/arizona\s+state\s+at\s+(.+)/i);
+    if (asuAtM) return asuAtM[1].trim();
+    const oppAtM = clean.match(/^(.+?)\s+at\s+arizona\s+state/i);
+    if (oppAtM) return oppAtM[1].trim();
+    return 'Opponent';
+  }
+
+  const groups = {};
+  for (const event of candidates) {
+    const name = deriveTournamentName(event.sport, event);
+    const key = `${event.sport}:${name}`;
+    if (!groups[key]) {
+      groups[key] = { id: `db:${key}`, sport: event.sport, name, events: [] };
+    }
+    groups[key].events.push(event);
+  }
+
+  const results = [];
+
+  for (const group of Object.values(groups)) {
+    group.events.sort((a, b) => a.start_date - b.start_date);
+
+    const games = group.events.map(event => ({
+      espnEventId: null,
+      dbEventId: event.id,
+      sport: event.sport,
+      title: event.title,
+      state: event.start_date < nowTs ? 'final' : 'upcoming',
+      asuScore: event.asu_score || null,
+      oppScore: event.opp_score || null,
+      asuWinner: event.result === 'W',
+      oppName: oppNameFromTitle(event.title),
+      oppLogo: event.opponent_logo || null,
+      oppAbbr: '',
+      situation: event.result ? `Final: ${event.asu_score}–${event.opp_score}` : '',
+      sportDetails: {},
+      location: event.location_name || null,
+      city: event.city || null,
+      stateAbbr: event.state || null,
+      tvNetwork: event.tv_network || null,
+      startTime: event.start_date,
+      isTournament: true,
+      espnNotes: '',
+      source: 'DB',
+    }));
+
+    const cfg = ALL_LIVE_CONFIGS.find(c => c.dbSport === group.sport);
+    if (!cfg) {
+      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games });
+      continue;
+    }
+
+    let standings = null;
+    try {
+      standings = await fetchPoolStandings(cfg.espnPath);
+    } catch (err) {
+      console.error(`[live] DB-detected pool fetch failed for ${group.sport}:`, err.message);
+    }
+    if (standings && standings.length > 0) {
+      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'pool', rounds: [], standings, seriesGames: [], games });
+      continue;
+    }
+
+    results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games });
+  }
+
+  return results;
+}
+
 async function fetchLiveGames() {
   const games = [];
 
@@ -555,7 +646,21 @@ async function fetchLiveGames() {
     }
   }
 
-  const tournaments = await buildTournaments(games);
+  const liveTournaments = await buildTournaments(games);
+
+  let dbTournaments = [];
+  try {
+    dbTournaments = await detectActiveTournaments();
+  } catch (err) {
+    console.error('[live] detectActiveTournaments failed:', err.message);
+  }
+
+  const liveKeys = new Set(liveTournaments.map(t => t.sport));
+  const tournaments = [
+    ...liveTournaments,
+    ...dbTournaments.filter(t => !liveKeys.has(t.sport)),
+  ];
+
   return { games, tournaments };
 }
 
@@ -606,4 +711,4 @@ async function fetchAndStoreScores() {
   return { updated, inserted };
 }
 
-module.exports = { fetchAndStoreScores, fetchLiveGames };
+module.exports = { fetchAndStoreScores, fetchLiveGames, TOURNAMENT_RE };
