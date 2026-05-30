@@ -1,0 +1,237 @@
+/* ── Feedback Widget ───────────────────────────────────────── */
+
+#feedback-trigger {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 8000;
+  background: #8C1D40;
+  color: #fff;
+  border: none;
+  border-radius: 50px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  transition: background 0.2s, box-shadow 0.2s, width 0.2s;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#feedback-trigger:hover {
+  background: #a82050;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+  width: 120px;
+}
+
+#feedback-trigger:hover .fb-label {
+  display: inline;
+}
+
+#feedback-trigger .fb-label {
+  display: none;
+  margin-left: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Overlay ── */
+
+#feedback-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 9000;
+  align-items: center;
+  justify-content: center;
+}
+
+#feedback-overlay.open {
+  display: flex;
+}
+
+/* ── Modal card ── */
+
+#feedback-modal {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  width: 100%;
+  max-width: 440px;
+  margin: 1rem;
+  font-family: ui-monospace, monospace;
+  color: #e6edf3;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.fb-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.fb-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e6edf3;
+  letter-spacing: 0.5px;
+}
+
+.fb-modal-close {
+  background: none;
+  border: none;
+  color: #7d8590;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+
+.fb-modal-close:hover {
+  color: #e6edf3;
+  background: #30363d;
+}
+
+.fb-modal-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ── Form fields ── */
+
+.fb-field label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #7d8590;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.fb-field select,
+.fb-field textarea {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  resize: vertical;
+}
+
+.fb-field select:focus,
+.fb-field textarea:focus {
+  border-color: #3b82f6;
+}
+
+.fb-field textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+/* ── Star rating ── */
+
+.fb-stars {
+  display: flex;
+  gap: 6px;
+}
+
+.fb-star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 22px;
+  color: #30363d;
+  transition: color 0.12s, transform 0.1s;
+  line-height: 1;
+}
+
+.fb-star.active {
+  color: #FFC627;
+}
+
+.fb-star:hover {
+  transform: scale(1.15);
+}
+
+/* ── Char counter ── */
+
+.fb-char-count {
+  text-align: right;
+  font-size: 10px;
+  color: #7d8590;
+  margin-top: 4px;
+  transition: color 0.15s;
+}
+
+.fb-char-count.amber { color: #f59e0b; }
+.fb-char-count.red   { color: #ef4444; }
+
+/* ── Submit ── */
+
+.fb-submit {
+  background: #8C1D40;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 16px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.2s;
+}
+
+.fb-submit:hover:not(:disabled) {
+  background: #a82050;
+}
+
+.fb-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Status messages ── */
+
+.fb-status {
+  text-align: center;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  display: none;
+}
+
+.fb-status.success {
+  display: block;
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.3);
+}
+
+.fb-status.error {
+  display: block;
+  background: rgba(239,68,68,0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239,68,68,0.3);
+}
