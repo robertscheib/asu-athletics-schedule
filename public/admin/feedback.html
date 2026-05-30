@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feedback Portal — ASU Athletics</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --accent:  #3b82f6;
+      --accent2: #60a5fa;
+      --text:    #e6edf3;
+      --muted:   #7d8590;
+      --maroon:  #8C1D40;
+      --gold:    #FFC627;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --font:    ui-monospace, monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.875rem 1.5rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      gap: 1rem;
+    }
+
+    .header-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.5px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    #unread-badge {
+      display: none;
+      background: var(--maroon);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 22px;
+      height: 22px;
+      border-radius: 11px;
+      padding: 0 6px;
+      line-height: 22px;
+      text-align: center;
+    }
+
+    #unread-badge.visible { display: inline-block; }
+
+    .btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .btn:hover { background: #21262d; border-color: var(--accent); }
+
+    .btn-maroon {
+      background: var(--maroon);
+      border-color: var(--maroon);
+      color: #fff;
+    }
+
+    .btn-maroon:hover { background: #a82050; border-color: #a82050; }
+
+    /* ── Main ── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 600px;
+    }
+
+    thead th {
+      background: #0d1117;
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #21262d;
+      transition: background 0.12s, opacity 0.2s;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    tbody tr.is-read { opacity: 0.55; }
+
+    td {
+      padding: 10px 14px;
+      vertical-align: top;
+      color: var(--text);
+    }
+
+    .col-date   { white-space: nowrap; color: var(--muted); font-size: 12px; }
+    .col-page   { text-transform: capitalize; }
+    .col-rating { white-space: nowrap; }
+    .col-msg    { max-width: 320px; word-break: break-word; }
+    .col-read   { white-space: nowrap; }
+
+    .star { color: var(--gold); }
+    .star.empty { color: var(--border); }
+
+    /* ── Read toggle button ── */
+    .btn-read {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-read:hover { border-color: var(--accent); color: var(--accent2); }
+    .btn-read.read  { border-color: var(--green); color: var(--green); }
+
+    /* ── Delete button ── */
+    .btn-delete {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      margin-left: 4px;
+    }
+
+    .btn-delete:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      justify-content: flex-end;
+    }
+
+    .pagination-info { color: var(--muted); font-size: 12px; }
+
+    /* ── Empty / error ── */
+    .state-msg {
+      padding: 2.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="header-title">Feedback Portal</span>
+  <div class="header-right">
+    <span id="unread-badge" aria-label="Unread feedback"></span>
+    <button class="btn btn-maroon" id="btn-mark-all">Mark All Read</button>
+  </div>
+</header>
+
+<main>
+  <div class="table-wrap">
+    <table id="feedback-table">
+      <thead>
+        <tr>
+          <th>Date / Time</th>
+          <th>Page</th>
+          <th>Rating</th>
+          <th>Message</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="feedback-body">
+        <tr><td colspan="5" class="state-msg">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination" id="pagination" style="display:none">
+    <span class="pagination-info" id="pagination-info"></span>
+    <button class="btn" id="btn-prev">← Prev</button>
+    <button class="btn" id="btn-next">Next →</button>
+  </div>
+</main>
+
+<script>
+(function () {
+  const LIMIT = 50;
+  let offset = 0;
+  let totalItems = 0;
+
+  const tbody   = document.getElementById('feedback-body');
+  const badge   = document.getElementById('unread-badge');
+  const paginEl = document.getElementById('pagination');
+  const pInfo   = document.getElementById('pagination-info');
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
+
+  function fmtDate(ms) {
+    return new Date(ms).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  }
+
+  function renderStars(rating) {
+    if (rating == null) return '<span style="color:var(--muted)">—</span>';
+    return Array.from({ length: 5 }, (_, i) =>
+      `<span class="star${i < rating ? '' : ' empty'}">★</span>`
+    ).join('');
+  }
+
+  function updateBadge(unread) {
+    if (unread > 0) {
+      badge.textContent = unread;
+      badge.classList.add('visible');
+    } else {
+      badge.classList.remove('visible');
+    }
+  }
+
+  function renderRow(item) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = item.id;
+    if (item.read) tr.classList.add('is-read');
+
+    tr.innerHTML = `
+      <td class="col-date">${fmtDate(item.submitted_at)}</td>
+      <td class="col-page">${item.page || '<span style="color:var(--muted)">—</span>'}</td>
+      <td class="col-rating">${renderStars(item.rating)}</td>
+      <td class="col-msg">${item.message ? escHtml(item.message) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td class="col-read">
+        <button class="btn-read${item.read ? ' read' : ''}" data-id="${item.id}">
+          ${item.read ? '✓ Read' : 'Mark read'}
+        </button>
+        <button class="btn-delete" data-id="${item.id}" title="Delete">✕</button>
+      </td>
+    `;
+
+    tr.querySelector('.btn-read').addEventListener('click', async function () {
+      const id = this.dataset.id;
+      try {
+        const res = await fetch(`/api/admin/feedback/${id}/read`, { method: 'POST' });
+        if (!res.ok) return;
+        tr.classList.add('is-read');
+        this.classList.add('read');
+        this.textContent = '✓ Read';
+        // Decrement badge
+        const cur = parseInt(badge.textContent) || 0;
+        if (cur > 1) { badge.textContent = cur - 1; }
+        else { badge.classList.remove('visible'); }
+      } catch { /* silent */ }
+    });
+
+    tr.querySelector('.btn-delete').addEventListener('click', async function () {
+      const id = this.dataset.id;
+      try {
+        const res = await fetch(`/api/admin/feedback/${id}`, { method: 'DELETE' });
+        if (!res.ok) return;
+        if (!tr.classList.contains('is-read')) {
+          const cur = parseInt(badge.textContent) || 0;
+          if (cur > 1) { badge.textContent = cur - 1; }
+          else { badge.classList.remove('visible'); }
+        }
+        tr.remove();
+        totalItems--;
+      } catch { /* silent */ }
+    });
+
+    return tr;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function loadFeedback() {
+    try {
+      const res = await fetch(`/api/admin/feedback?limit=${LIMIT}&offset=${offset}`);
+      if (!res.ok) throw new Error('non-ok');
+      const data = await res.json();
+
+      totalItems = data.total;
+      updateBadge(data.unread);
+
+      if (!data.items.length && offset === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="state-msg">No feedback yet.</td></tr>';
+        paginEl.style.display = 'none';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      data.items.forEach(item => tbody.appendChild(renderRow(item)));
+
+      // Pagination
+      const totalPages = Math.ceil(totalItems / LIMIT);
+      const curPage = Math.floor(offset / LIMIT) + 1;
+      pInfo.textContent = `${offset + 1}–${Math.min(offset + LIMIT, totalItems)} of ${totalItems}`;
+      btnPrev.disabled = offset === 0;
+      btnNext.disabled = offset + LIMIT >= totalItems;
+      paginEl.style.display = totalItems > LIMIT ? 'flex' : 'none';
+    } catch {
+      tbody.innerHTML = '<tr><td colspan="5" class="state-msg">Failed to load feedback.</td></tr>';
+      paginEl.style.display = 'none';
+    }
+  }
+
+  document.getElementById('btn-mark-all').addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/admin/feedback/read-all', { method: 'POST' });
+      if (!res.ok) return;
+      await loadFeedback();
+    } catch { /* silent */ }
+  });
+
+  btnPrev.addEventListener('click', () => { offset = Math.max(0, offset - LIMIT); loadFeedback(); });
+  btnNext.addEventListener('click', () => { offset += LIMIT; loadFeedback(); });
+
+  loadFeedback();
+  setInterval(loadFeedback, 30000);
+})();
+</script>
+</body>
+</html>

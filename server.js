@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { queryEvents, getSports, getLocations } = require('./db');
+const { queryEvents, getSports, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
 const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
@@ -45,6 +45,8 @@ const adminLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+app.use(express.json());
 
 // Static files — no rate limiting
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -128,6 +130,83 @@ app.get('/api/bracket', liveLimit, async (req, res) => {
     res.json({ rounds: [], source: 'not-implemented', sport, tournamentId });
   } catch (err) {
     console.error('[api] /api/bracket error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/feedback', generalLimit, (req, res) => {
+  try {
+    const { page, rating, message } = req.body ?? {};
+    if (!message && rating == null) {
+      return res.status(400).json({ error: 'At least one of message or rating is required' });
+    }
+    if (message != null && message.length > 1000) {
+      return res.status(400).json({ error: 'Message exceeds 1000 characters' });
+    }
+    if (rating != null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
+      return res.status(400).json({ error: 'Rating must be an integer between 1 and 5' });
+    }
+    const user_agent = req.headers['user-agent'] ?? null;
+    const id = insertFeedback({ page: page ?? null, rating: rating ?? null, message: message ?? null, user_agent });
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('[api] /api/feedback error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/feedback/unread-count', generalLimit, (req, res) => {
+  try {
+    res.json({ unread: getUnreadCount() });
+  } catch (err) {
+    console.error('[api] /api/feedback/unread-count error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/feedback', adminLimit, (req, res) => {
+  try {
+    const origin = req.headers['origin'] || req.headers['referer'] || '';
+    if (!origin.includes('asu.dikaiaserver.com')) {
+      console.warn('[api] /api/admin/feedback accessed from unexpected origin:', origin);
+    }
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    res.json(getAllFeedback(limit, offset));
+  } catch (err) {
+    console.error('[api] /api/admin/feedback error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/feedback/:id/read', adminLimit, (req, res) => {
+  try {
+    const changes = markRead(req.params.id);
+    if (changes === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/admin/feedback/:id/read error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/feedback/:id', adminLimit, (req, res) => {
+  try {
+    const changes = deleteFeedback(req.params.id);
+    if (changes === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/admin/feedback/:id delete error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/feedback/read-all', adminLimit, (req, res) => {
+  try {
+    const count = markAllRead();
+    res.json({ success: true, count });
+  } catch (err) {
+    console.error('[api] /api/admin/feedback/read-all error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -15,6 +15,18 @@ const REGIONS = {
 const db = new Database(path.join(__dirname, 'events.db'));
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS feedback (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    submitted_at INTEGER NOT NULL,
+    page         TEXT,
+    rating       INTEGER,
+    message      TEXT,
+    user_agent   TEXT,
+    read         INTEGER NOT NULL DEFAULT 0
+  )
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
     title TEXT,
@@ -184,4 +196,37 @@ function updateCoordinates(id, lat, lng) {
   updateCoordinatesStmt.run({ id, lat, lng });
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS };
+const insertFeedbackStmt = db.prepare(`
+  INSERT INTO feedback (submitted_at, page, rating, message, user_agent)
+  VALUES (@submitted_at, @page, @rating, @message, @user_agent)
+`);
+
+function insertFeedback({ page, rating, message, user_agent }) {
+  const result = insertFeedbackStmt.run({ submitted_at: Date.now(), page: page ?? null, rating: rating ?? null, message: message ?? null, user_agent: user_agent ?? null });
+  return result.lastInsertRowid;
+}
+
+function getUnreadCount() {
+  return db.prepare('SELECT COUNT(*) as count FROM feedback WHERE read=0').get().count;
+}
+
+function getAllFeedback(limit = 50, offset = 0) {
+  const total = db.prepare('SELECT COUNT(*) as count FROM feedback').get().count;
+  const unread = db.prepare('SELECT COUNT(*) as count FROM feedback WHERE read=0').get().count;
+  const items = db.prepare('SELECT * FROM feedback ORDER BY submitted_at DESC LIMIT @limit OFFSET @offset').all({ limit, offset });
+  return { total, unread, items };
+}
+
+function markRead(id) {
+  return db.prepare('UPDATE feedback SET read=1 WHERE id=@id').run({ id }).changes;
+}
+
+function markAllRead() {
+  return db.prepare('UPDATE feedback SET read=1 WHERE read=0').run().changes;
+}
+
+function deleteFeedback(id) {
+  return db.prepare('DELETE FROM feedback WHERE id=@id').run({ id }).changes;
+}
+
+module.exports = { upsertMany, queryEvents, getSports, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback };
