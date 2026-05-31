@@ -99,7 +99,7 @@ const upsertMany = db.transaction((events) => {
   for (const event of events) upsertEvent.run(event);
 });
 
-function queryEvents({ sport, game_type, city, state, region, from, to } = {}) {
+function queryEvents({ sport, game_type, city, state, region, from, to, season } = {}) {
   const conditions = [];
   const params = {};
 
@@ -110,6 +110,10 @@ function queryEvents({ sport, game_type, city, state, region, from, to } = {}) {
   if (game_type) {
     conditions.push('game_type = @game_type');
     params.game_type = game_type;
+  }
+  if (season) {
+    conditions.push('season = @season');
+    params.season = season;
   }
   if (city) {
     conditions.push('city = @city');
@@ -135,6 +139,28 @@ function queryEvents({ sport, game_type, city, state, region, from, to } = {}) {
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return db.prepare(`SELECT * FROM events ${where} ORDER BY start_date ASC`).all(params);
+}
+
+function getSeasons() {
+  return db.prepare('SELECT DISTINCT season FROM events WHERE season IS NOT NULL ORDER BY season DESC').all().map(r => r.season);
+}
+
+function getRecordsBySeason(season) {
+  const rows = db.prepare(`
+    SELECT sport,
+      SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN result = 'T' THEN 1 ELSE 0 END) as ties
+    FROM events
+    WHERE result IS NOT NULL AND season = @season
+    GROUP BY sport
+    ORDER BY sport
+  `).all({ season });
+  const overall = rows.reduce(
+    (acc, r) => ({ w: acc.w + r.wins, l: acc.l + r.losses, t: acc.t + r.ties }),
+    { w: 0, l: 0, t: 0 }
+  );
+  return { overall, bySport: rows };
 }
 
 function getSports() {
@@ -229,4 +255,4 @@ function deleteFeedback(id) {
   return db.prepare('DELETE FROM feedback WHERE id=@id').run({ id }).changes;
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback };
+module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback };

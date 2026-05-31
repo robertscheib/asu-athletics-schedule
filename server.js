@@ -3,7 +3,7 @@ const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fetch = require('node-fetch');
-const { queryEvents, getSports, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback } = require('./db');
+const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
 const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
@@ -190,8 +190,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 app.get('/api/events', generalLimit, (req, res) => {
   try {
-    const { sport, game_type, city, state, region, from, to } = req.query;
-    const events = queryEvents({ sport, game_type, city, state, region, from, to });
+    const { sport, game_type, city, state, region, from, to, season } = req.query;
+    const events = queryEvents({ sport, game_type, city, state, region, from, to, season });
     res.json(events);
   } catch (err) {
     console.error('[api] /api/events error:', err.message);
@@ -212,6 +212,14 @@ app.get('/api/locations', generalLimit, (req, res) => {
     res.json(getLocations());
   } catch (err) {
     res.status(500).json({ error: 'Failed to query locations' });
+  }
+});
+
+app.get('/api/seasons', generalLimit, (req, res) => {
+  try {
+    res.json(getSeasons());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to query seasons' });
   }
 });
 
@@ -245,7 +253,8 @@ app.get('/api/live', liveLimit, async (req, res) => {
                     TOURNAMENT_RE.test(nextRow.badges || '') ||
                     TOURNAMENT_RE.test(nextRow.location_name || ''),
     } : null;
-    res.json({ games, tournaments, nextGame });
+    const records = getRecordsBySeason('2026');
+    res.json({ games, tournaments, nextGame, records });
   } catch (err) {
     console.error('[api] /api/live error:', err.message);
     res.status(500).json({ error: err.message });

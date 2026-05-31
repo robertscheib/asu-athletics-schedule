@@ -49,6 +49,13 @@
     </div>
 
     <div class="filter-group">
+      <label class="group-label">Season</label>
+      <select id="filter-season" onchange="applySeason(this.value)">
+        <option value="">All Seasons</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
       <label class="group-label">Game Type</label>
       <div class="game-type-toggles" id="game-type-toggles">
         <button data-type="home" onclick="toggleGameType(this)">Home</button>
@@ -58,21 +65,10 @@
     </div>
 
     <div class="filter-group">
-      <label class="group-label">City</label>
-      <select id="filter-city" onchange="applyFilters()">
-        <option value="">All Cities</option>
-      </select>
-    </div>
-
-    <div class="filter-group">
-      <label class="group-label">Region</label>
-      <select id="filter-region" onchange="toggleRegion(this)">
+      <label class="group-label">Location</label>
+      <select id="filter-region" onchange="toggleRegion(this)" style="margin-bottom:6px">
         <option value="">All Regions</option>
       </select>
-    </div>
-
-    <div class="filter-group">
-      <label class="group-label">State</label>
       <select id="filter-state" onchange="applyFilters()">
         <option value="">All States</option>
       </select>
@@ -127,10 +123,10 @@
   </div>
 </div>
 
-<script src="filters.js?v=10"></script>
+<script src="filters.js?v=11"></script>
 <script src="calendar.js?v=8"></script>
 <script src="map.js?v=2"></script>
-<script src="live.js?v=17"></script>
+<script src="live.js?v=18"></script>
 <script src="feedback.js" defer></script>
 
 </body>

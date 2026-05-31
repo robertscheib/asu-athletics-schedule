@@ -23,11 +23,12 @@ async function pollLive() {
     return;
   }
 
-  // Support both old array format and new {games, tournaments, nextGame}
-  const games      = Array.isArray(data) ? data : (data.games || []);
+  // Support both old array format and new {games, tournaments, nextGame, records}
+  const games       = Array.isArray(data) ? data : (data.games || []);
   const tournaments = Array.isArray(data) ? [] : (data.tournaments || []);
-  const nextGame   = Array.isArray(data) ? null : (data.nextGame || null);
-  _lastData = { games, tournaments, nextGame };
+  const nextGame    = Array.isArray(data) ? null : (data.nextGame || null);
+  const records     = Array.isArray(data) ? null : (data.records || null);
+  _lastData = { games, tournaments, nextGame, records };
 
   const liveGames = games.filter(g => g.state === 'live');
 
@@ -37,6 +38,7 @@ async function pollLive() {
     if (g.dbEventId) window.__liveData[g.dbEventId] = g;
   }
 
+  _checkAndNotify(games);
   updateLiveBanner(liveGames);
   updateCalendarLiveBadges();
   updateListLiveBadges();
@@ -47,7 +49,7 @@ async function pollLive() {
   const liveEl = document.getElementById('live-view');
   if (liveEl && liveEl.style.display === 'block') {
     try {
-      _renderLiveView(games, tournaments, nextGame);
+      _renderLiveView(games, tournaments, nextGame, records);
     } catch (err) {
       console.error('[live] renderLiveView failed:', err);
       liveEl.innerHTML = `<div class="live-empty-state"><p>Error rendering live data. Check console.</p></div>`;
@@ -57,7 +59,77 @@ async function pollLive() {
 
 // ── Live tab render ───────────────────────────────────────────────────────────
 
-function _renderLiveView(games, tournaments, nextGame) {
+function _buildNotifyBar() {
+  if (typeof Notification === 'undefined') return '';
+  const perm = Notification.permission;
+  if (perm === 'denied') return '';
+  const isOn = perm === 'granted';
+  return `
+    <div class="notify-bar" id="notify-bar">
+      <span class="notify-bar-text">🔔 ${isOn ? 'Notifications on' : 'Get notified when games go live'}</span>
+      ${!isOn ? '<button class="notify-btn" onclick="requestNotifyPermission()">Enable</button>' : ''}
+    </div>`;
+}
+
+async function requestNotifyPermission() {
+  const result = await Notification.requestPermission();
+  const bar = document.getElementById('notify-bar');
+  if (bar) {
+    if (result === 'granted') {
+      bar.innerHTML = '<span class="notify-bar-text">🔔 Notifications on</span>';
+    } else {
+      bar.remove();
+    }
+  }
+}
+
+// Track which ESPN event IDs we've already notified about (persists across polls)
+const _notifiedIds = new Set(JSON.parse(localStorage.getItem('asu-notified-ids') || '[]'));
+
+function _checkAndNotify(games) {
+  if (Notification.permission !== 'granted') return;
+  const liveGames = games.filter(g => g.state === 'live');
+  for (const game of liveGames) {
+    if (!game.espnEventId || _notifiedIds.has(game.espnEventId)) continue;
+    _notifiedIds.add(game.espnEventId);
+    try { localStorage.setItem('asu-notified-ids', JSON.stringify([..._notifiedIds])); } catch {}
+    const title = 'ASU Game Live Now';
+    const body  = `${game.sport}: ${shortOppName(game.oppName)} — ${game.asuScore ?? 0}–${game.oppScore ?? 0}`;
+    new Notification(title, {
+      body,
+      icon: '/sparky.png',
+      badge: '/sparky.png',
+      tag: game.espnEventId,
+    });
+  }
+}
+
+function renderRecordWidget(records) {
+  if (!records) return '';
+  const { overall, bySport } = records;
+  if (!overall || (overall.w + overall.l + overall.t === 0)) return '';
+
+  const tieStr = overall.t > 0 ? `-${overall.t}` : '';
+  const overallStr = `${overall.w}-${overall.l}${tieStr}`;
+
+  const sportRows = (bySport || []).map(r => {
+    const t = r.ties > 0 ? `-${r.ties}` : '';
+    return `
+      <div class="record-sport-row">
+        <span class="record-sport-name">${esc(r.sport)}</span>
+        <span class="record-sport-wl">${r.wins}-${r.losses}${t}</span>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="record-widget">
+      <div class="record-widget-label">2025–26 Season Record</div>
+      <div class="record-widget-overall">${overallStr}</div>
+      <div class="record-sport-grid">${sportRows}</div>
+    </div>`;
+}
+
+function _renderLiveView(games, tournaments, nextGame, records) {
   const container = document.getElementById('live-view');
   if (!container) return;
 
@@ -85,7 +157,7 @@ function _renderLiveView(games, tournaments, nextGame) {
     }];
   }
 
-  let html = '';
+  let html = _buildNotifyBar();
 
   if (liveGames.length > 0) {
     html += sectionHeader('<span class="live-dot-lg"></span> Live Now', true);
@@ -118,11 +190,13 @@ function _renderLiveView(games, tournaments, nextGame) {
     html += `<div class="live-cards-grid">${finalGames.map(renderGameCard).join('')}</div>`;
     if (tournaments.length > 0) html += renderTournaments(tournaments);
     if (nextGame) html += renderNextGameBlock(nextGame);
+    html += renderRecordWidget(records);
 
   } else if (nextGame) {
     html += `<p class="live-no-games-msg">No games in progress right now.</p>`;
     if (tournaments.length > 0) html += renderTournaments(tournaments);
     html += renderNextGameBlock(nextGame);
+    html += renderRecordWidget(records);
 
   } else if (tournaments.length > 0) {
     html += renderTournaments(tournaments);
@@ -900,7 +974,7 @@ window.renderLiveView = function() {
   }
   if (_lastData) {
     try {
-      _renderLiveView(_lastData.games, _lastData.tournaments, _lastData.nextGame);
+      _renderLiveView(_lastData.games, _lastData.tournaments, _lastData.nextGame, _lastData.records);
     } catch (err) {
       console.error('[live] renderLiveView threw:', err);
       container.innerHTML = `<div class="live-empty-state"><p style="color:red">Render error: ${err.message}</p></div>`;
