@@ -334,7 +334,11 @@ function chipRow(chips) {
 function renderTournaments(tournaments) {
   if (!tournaments || !tournaments.length) return '';
   return tournaments.map(t => {
+    // Baseball bracket has its own NCAA data source — always show it.
     if (t.format === 'bracket' && t.sport === 'Baseball') return renderNcaaBracketShell(t);
+    // All other tournaments: hide until at least one game is live or final.
+    const hasData = (t.games || []).some(g => g.state === 'live' || g.state === 'final');
+    if (!hasData) return '';
     if (!t.bracketReady) return renderUpcomingTournament(t);
     if (t.format === 'pool') return renderPoolStandings(t);
     if (t.format === 'series') return renderSeriesPanel(t);
