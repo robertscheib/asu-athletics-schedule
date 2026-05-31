@@ -142,25 +142,54 @@ function queryEvents({ sport, game_type, city, state, region, from, to, season }
 }
 
 function getSeasons() {
-  return db.prepare('SELECT DISTINCT season FROM events WHERE season IS NOT NULL ORDER BY season DESC').all().map(r => r.season);
+  // Exclude cross-year compound seasons (e.g. '2025_26', '2026_27') — they have no
+  // completed results and are confusing; individual year seasons already cover them.
+  return db.prepare(
+    "SELECT DISTINCT season FROM events WHERE season IS NOT NULL AND instr(season, '_') = 0 ORDER BY season DESC"
+  ).all().map(r => r.season);
 }
 
-function getRecordsBySeason(season) {
+function getRecordsBySeason() {
+  // For each sport, use the most recent season that has completed results.
+  // This handles sports whose seasons straddle the calendar year boundary
+  // (e.g. Football ends in '2025', Baseball is in '2026').
   const rows = db.prepare(`
-    SELECT sport,
-      SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) as losses,
-      SUM(CASE WHEN result = 'T' THEN 1 ELSE 0 END) as ties
-    FROM events
-    WHERE result IS NOT NULL AND season = @season
-    GROUP BY sport
-    ORDER BY sport
-  `).all({ season });
+    WITH best_season AS (
+      SELECT sport, MAX(season) as season
+      FROM events
+      WHERE result IS NOT NULL AND season IS NOT NULL
+      GROUP BY sport
+    )
+    SELECT e.sport,
+      SUM(CASE WHEN e.result = 'W' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN e.result = 'L' THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN e.result = 'T' THEN 1 ELSE 0 END) as ties,
+      bs.season as season
+    FROM events e
+    JOIN best_season bs ON e.sport = bs.sport AND e.season = bs.season
+    WHERE e.result IS NOT NULL
+    GROUP BY e.sport
+    ORDER BY e.sport
+  `).all();
+
   const overall = rows.reduce(
     (acc, r) => ({ w: acc.w + r.wins, l: acc.l + r.losses, t: acc.t + r.ties }),
     { w: 0, l: 0, t: 0 }
   );
-  return { overall, bySport: rows };
+
+  // Pick the most common season across sports to derive the display label.
+  const seasonCounts = {};
+  for (const r of rows) seasonCounts[r.season] = (seasonCounts[r.season] || 0) + 1;
+  const dominantSeason = Object.entries(seasonCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+  function seasonDisplayLabel(s) {
+    if (!s) return 'Current Season';
+    const yr = parseInt(s.split('_')[0]);
+    if (isNaN(yr)) return s;
+    return `${yr - 1}–${String(yr).slice(2)} Season Record`;
+  }
+  const label = seasonDisplayLabel(dominantSeason);
+
+  return { overall, bySport: rows, label };
 }
 
 function getSports() {

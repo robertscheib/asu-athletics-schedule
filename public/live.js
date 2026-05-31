@@ -106,7 +106,7 @@ function _checkAndNotify(games) {
 
 function renderRecordWidget(records) {
   if (!records) return '';
-  const { overall, bySport } = records;
+  const { overall, bySport, label } = records;
   if (!overall || (overall.w + overall.l + overall.t === 0)) return '';
 
   const tieStr = overall.t > 0 ? `-${overall.t}` : '';
@@ -123,7 +123,7 @@ function renderRecordWidget(records) {
 
   return `
     <div class="record-widget">
-      <div class="record-widget-label">2025–26 Season Record</div>
+      <div class="record-widget-label">${esc(label || 'Season Record')}</div>
       <div class="record-widget-overall">${overallStr}</div>
       <div class="record-sport-grid">${sportRows}</div>
     </div>`;
@@ -173,6 +173,7 @@ function _renderLiveView(games, tournaments, nextGame, records) {
       html += sectionHeader("Today's Results");
       html += `<div class="live-cards-grid">${finalGames.map(renderGameCard).join('')}</div>`;
     }
+    html += renderRecordWidget(records);
 
   } else if (upcomingGames.length > 0) {
     const soonest = upcomingGames.reduce((a, b) => a.startTime < b.startTime ? a : b);

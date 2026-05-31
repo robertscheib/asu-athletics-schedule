@@ -253,7 +253,7 @@ app.get('/api/live', liveLimit, async (req, res) => {
                     TOURNAMENT_RE.test(nextRow.badges || '') ||
                     TOURNAMENT_RE.test(nextRow.location_name || ''),
     } : null;
-    const records = getRecordsBySeason('2026');
+    const records = getRecordsBySeason();
     res.json({ games, tournaments, nextGame, records });
   } catch (err) {
     console.error('[api] /api/live error:', err.message);
