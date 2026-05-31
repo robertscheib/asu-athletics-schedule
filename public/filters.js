@@ -42,27 +42,20 @@ function sportColor(sport) {
 
 // ── Logo / opponent identity helpers ─────────────────────────────────────────
 
-// Matches ONLY University of Arizona — NOT Arizona State, Arizona St., etc.
-const UA_EXACT_PATTERNS = [
-  /\buniversity\s+of\s+arizona\b/i,
-  /\barizona\s+wildcats?\b/i,
-  /\bwildcats?\b.*\bariz/i,
-  // Standalone "Arizona" only when NOT followed by "State" or "St"
-  /\barizona\b(?!\s+st(?:ate|\.)?)/i,
-];
-
 function isUA(title, opponentLogo) {
-  const t = (title || '')
-    .replace(/^(at|vs\.?)\s+/i, '');
+  // Extract the opponent from "[prefix] at/vs. [Opponent]" — take everything
+  // after the last occurrence of "at " or "vs. " in the title.
+  const vsMatch = (title || '').match(/\b(?:at|vs\.?)\s+(.+)$/i);
+  const opponent = (vsMatch ? vsMatch[1] : title || '').trim();
 
-  const isAsuTitle =
-    /arizona\s+st(?:ate|\.)?/i.test(t) ||
-    /\basu\b/i.test(t) ||
-    /sun\s+devil/i.test(t);
+  // Opponent is specifically UA when it starts with bare "Arizona",
+  // "Arizona Wildcats", or "University of Arizona".
+  // This correctly rejects "Northern Arizona", "Arizona Christian", etc.
+  if (/^arizona\s*$/i.test(opponent)) return true;
+  if (/^arizona\s+wildcats?/i.test(opponent)) return true;
+  if (/^university\s+of\s+arizona/i.test(opponent)) return true;
 
-  if (!isAsuTitle && UA_EXACT_PATTERNS.some(p => p.test(t))) return true;
-
-  // ESPN logo URL contains "arizona-wildcats" (not "state")
+  // ESPN logo URL contains "arizona-wildcat"
   if (opponentLogo && /arizona-wildcat/i.test(opponentLogo)) return true;
 
   return false;
