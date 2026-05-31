@@ -2,9 +2,9 @@
 const filters = {
   sports: new Set(),
   gameTypes: new Set(),
-  city: '',
   region: '',
   state: '',
+  season: '',
   from: '',
   to: '',
 };
@@ -40,10 +40,40 @@ function sportColor(sport) {
   return sportColorMap[sport];
 }
 
+function seasonLabel(val) {
+  if (val === '2025')    return '2024–25';
+  if (val === '2026')    return '2025–26';
+  if (val === '2025_26') return '2024–25 (Full)';
+  if (val === '2026_27') return '2025–26 (Full)';
+  return val;
+}
+
+// ── Toast notifications ────────────────────────────────
+
+function showToast(message, type = 'success', duration = 3500) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-show'));
+  setTimeout(() => {
+    toast.classList.remove('toast-show');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+  }, duration);
+}
+
 async function loadFilterOptions() {
-  const [sports, locations] = await Promise.all([
+  const [sports, locations, seasons, allEvents] = await Promise.all([
     fetch('/api/sports').then(r => r.json()),
     fetch('/api/locations').then(r => r.json()),
+    fetch('/api/seasons').then(r => r.json()),
+    fetch('/api/events').then(r => r.json()),
   ]);
 
   allLocations = locations;
@@ -63,15 +93,6 @@ async function loadFilterOptions() {
     list.appendChild(label);
   }
 
-  // City dropdown
-  const citySelect = document.getElementById('filter-city');
-  const cities = [...new Set(locations.map(l => l.city).filter(Boolean))].sort();
-  cities.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c; opt.textContent = c;
-    citySelect.appendChild(opt);
-  });
-
   // Region dropdown — only show regions that have at least one event location
   const regionSelect = document.getElementById('filter-region');
   const locationStates = new Set(locations.map(l => l.state).filter(Boolean));
@@ -86,6 +107,23 @@ async function loadFilterOptions() {
 
   // State dropdown
   rebuildStateDropdown('');
+
+  // Season dropdown
+  const seasonSelect = document.getElementById('filter-season');
+  seasons.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = seasonLabel(s);
+    seasonSelect.appendChild(opt);
+  });
+
+  // Auto-select most recent season with completed games
+  const seasonsWithResults = [...new Set(allEvents.filter(e => e.result).map(e => e.season).filter(Boolean))];
+  if (seasonsWithResults.length) {
+    const defaultSeason = seasonsWithResults.sort().pop();
+    seasonSelect.value = defaultSeason;
+    applySeason(defaultSeason);
+  }
 }
 
 function rebuildStateDropdown(region) {
@@ -140,8 +178,12 @@ function toggleGameType(btn) {
   applyFilters();
 }
 
+function applySeason(val) {
+  filters.season = val;
+  applyFilters();
+}
+
 function applyFilters() {
-  filters.city = document.getElementById('filter-city').value;
   filters.region = document.getElementById('filter-region').value;
   filters.state = document.getElementById('filter-state').value;
   filters.from = document.getElementById('filter-from').value;
@@ -152,15 +194,15 @@ function applyFilters() {
 function clearFilters() {
   filters.sports.clear();
   filters.gameTypes.clear();
-  filters.city = '';
   filters.region = '';
   filters.state = '';
+  filters.season = '';
   filters.from = '';
   filters.to = '';
 
   document.querySelectorAll('#sport-list input[type=checkbox]').forEach(cb => cb.checked = false);
   document.querySelectorAll('.game-type-toggles button').forEach(b => b.classList.remove('active'));
-  document.getElementById('filter-city').value = '';
+  document.getElementById('filter-season').value = '';
   document.getElementById('filter-region').value = '';
   document.getElementById('filter-from').value = '';
   document.getElementById('filter-to').value = '';
@@ -173,7 +215,7 @@ function buildQueryString() {
   const params = new URLSearchParams();
   if (filters.sports.size === 1) params.set('sport', [...filters.sports][0]);
   if (filters.gameTypes.size === 1) params.set('game_type', [...filters.gameTypes][0]);
-  if (filters.city) params.set('city', filters.city);
+  if (filters.season) params.set('season', filters.season);
   if (filters.region) params.set('region', filters.region);
   if (filters.state) params.set('state', filters.state);
   if (filters.from) params.set('from', Math.floor(new Date(filters.from).getTime() / 1000));
@@ -579,21 +621,24 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalDi
 async function triggerRefresh() {
   const btn = document.getElementById('btn-refresh');
   btn.disabled = true;
-  btn.textContent = 'Refreshing…';
+  btn.innerHTML = '<span class="btn-spinner"></span> Refreshing…';
   try {
     const res = await fetch('/api/refresh', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
-      btn.textContent = `Done (${data.count} events)`;
+      btn.innerHTML = '✓ Done';
+      showToast(`Refreshed — ${data.count} events loaded`, 'success');
       window.reloadEvents && window.reloadEvents();
       loadFilterOptions();
     } else {
-      btn.textContent = 'Error';
+      btn.innerHTML = 'Error';
+      showToast('Refresh failed. Try again.', 'error');
     }
   } catch {
-    btn.textContent = 'Error';
+    btn.innerHTML = 'Error';
+    showToast('Network error during refresh.', 'error');
   }
-  setTimeout(() => { btn.disabled = false; btn.textContent = 'Refresh'; }, 3000);
+  setTimeout(() => { btn.disabled = false; btn.innerHTML = 'Refresh'; }, 3000);
 }
 
 // ── Filters toggle (mobile) ────────────────────────────
