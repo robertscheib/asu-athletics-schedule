@@ -10,10 +10,11 @@ const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
 const { startScheduler } = require('./scheduler');
 
 // ── In-memory caches ──────────────────────────────────────────────────────────
-const _espnGameCache    = new Map();                    // espnEventId → {data, expiresAt}
-const _ncaaConfigCache  = { data: null, expiresAt: 0 }; // scraped SHA config
-const _ncaaSectionCache = { data: null, expiresAt: 0 }; // ASU's regional sectionId
-const _ncaaBracketCache = new Map();                    // sectionId → {data, expiresAt}
+const _espnGameCache       = new Map(); // espnEventId → {data, expiresAt}
+const _espnScoreboardCache = new Map(); // yyyymmdd    → {data, expiresAt}
+const _ncaaConfigCache     = { data: null, expiresAt: 0 };
+const _ncaaSectionCache    = { data: null, expiresAt: 0 };
+const _ncaaBracketCache    = new Map(); // sectionId  → {data, expiresAt}
 
 // Sport slug mapping for ESPN summary endpoint
 const ESPN_SPORT_SLUGS = {
@@ -98,6 +99,44 @@ function matchNcaaToEspn(ncaaGame, liveGames) {
       return words.length > 0 && words.every(w => haystack.includes(w.toLowerCase()));
     });
   })?.espnEventId ?? null;
+}
+
+// Fetch the full ESPN college-baseball scoreboard for a given date (YYYYMMDD).
+// Past dates cached 24 h; today cached 60 s (games may still be live).
+async function _fetchEspnScoreboard(yyyymmdd) {
+  const now = Date.now();
+  const cached = _espnScoreboardCache.get(yyyymmdd);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  const url = `https://site.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyymmdd}`;
+  const r = await fetch(url, { headers: { 'User-Agent': 'ASU-Athletics-Calendar/1.0' }, timeout: 10000 });
+  if (!r.ok) throw new Error(`ESPN scoreboard HTTP ${r.status}`);
+  const events = (await r.json()).events || [];
+
+  const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const ttl = yyyymmdd === todayStr ? 60_000 : 24 * 60 * 60 * 1000;
+  _espnScoreboardCache.set(yyyymmdd, { data: events, expiresAt: now + ttl });
+  return events;
+}
+
+// Match an NCAA bracket game to an ESPN event using the full scoreboard.
+// Uses section title (e.g., "Lincoln") from the ESPN game's notes field
+// to narrow to the right regional before doing time + team name matching.
+function _matchNcaaToEspnFull(ncaaGame, espnEvents, sectionTitle) {
+  if (!ncaaGame.startTimeEpoch) return null;
+  for (const event of espnEvents) {
+    const notes = (event.competitions?.[0]?.notes || []).map(n => n.headline || '').join(' ');
+    if (sectionTitle && !notes.toLowerCase().includes(sectionTitle.toLowerCase())) continue;
+    const eventTs = Math.floor(new Date(event.date).getTime() / 1000);
+    // Use 2-hour window: ESPN and NCAA may disagree on scheduled time (delays, rescheduling).
+    // The section-title filter keeps false positives negligible even with a wide window.
+    if (Math.abs(eventTs - ncaaGame.startTimeEpoch) >= 7200) continue;
+    const teams = (event.competitions?.[0]?.competitors || [])
+      .map(c => c.team?.displayName || '').join(' ').toLowerCase();
+    const words = (ncaaGame.teams || []).flatMap(t => _ncaaNameWords(t.nameShort));
+    if (words.length > 0 && words.some(w => teams.includes(w.toLowerCase()))) return event.id;
+  }
+  return null;
 }
 
 const app = express();
@@ -460,14 +499,33 @@ app.get('/api/ncaa/bracket/:sectionId', liveLimit, async (req, res) => {
     const data = await r.json();
     const games = data?.data?.championshipGames || [];
 
-    // Cross-reference with live data to attach espnEventIds
-    let liveGames = [];
-    try {
-      const liveData = await fetchLiveGames();
-      liveGames = liveData.games || [];
-    } catch {}
+    // Determine which dates are represented in this bracket (NCAA startDate: "MM/DD/YYYY")
+    const dateSet = new Set();
+    for (const g of games) {
+      if (g.startDate) {
+        const [m, d, y] = g.startDate.split('/');
+        if (y && m && d) dateSet.add(`${y}${m.padStart(2, '0')}${d.padStart(2, '0')}`);
+      }
+    }
+    // Also always include today so live games are found
+    dateSet.add(new Date().toISOString().slice(0, 10).replace(/-/g, ''));
 
-    const augmented = games.map(g => ({ ...g, espnEventId: matchNcaaToEspn(g, liveGames) }));
+    // Fetch full ESPN scoreboards for those dates
+    const scoreboardEvents = [];
+    for (const yyyymmdd of dateSet) {
+      try { scoreboardEvents.push(...await _fetchEspnScoreboard(yyyymmdd)); } catch {}
+    }
+
+    const sectionTitle = games[0]?.section?.title || '';
+
+    // Live-games cross-ref (fast, real-time ASU games) + full scoreboard (all regional games)
+    let liveGames = [];
+    try { liveGames = (await fetchLiveGames()).games || []; } catch {}
+
+    const augmented = games.map(g => ({
+      ...g,
+      espnEventId: matchNcaaToEspn(g, liveGames) ?? _matchNcaaToEspnFull(g, scoreboardEvents, sectionTitle),
+    }));
     _ncaaBracketCache.set(sectionId, { data: augmented, expiresAt: now + 60 * 1000 });
     res.json(augmented);
   } catch (err) {
