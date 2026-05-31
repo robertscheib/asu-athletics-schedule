@@ -67,6 +67,24 @@ function _renderLiveView(games, tournaments, nextGame) {
   const upcomingGames = games.filter(g => g.state === 'upcoming');
   const finalGames    = games.filter(g => g.state === 'final');
 
+  // If there are baseball games but no baseball bracket tournament detected (e.g. ESPN notes
+  // missing or DB event not synced), inject a synthetic baseball bracket tournament so the
+  // NCAA bracket section always shows during postseason.
+  const hasBracketTourney = tournaments.some(t => t.sport === 'Baseball' && t.format === 'bracket');
+  const baseballMonth = new Date().getMonth(); // 0-indexed; 4=May 5=June
+  const hasBaseballGames = games.some(g => g.sport === 'Baseball');
+  if (!hasBracketTourney && hasBaseballGames && (baseballMonth === 4 || baseballMonth === 5)) {
+    tournaments = [...tournaments, {
+      id: 'ncaa-baseball-auto',
+      sport: 'Baseball',
+      name: 'NCAA Regional',
+      format: 'bracket',
+      bracketReady: false,
+      rounds: [],
+      games: [],
+    }];
+  }
+
   let html = '';
 
   if (liveGames.length > 0) {
