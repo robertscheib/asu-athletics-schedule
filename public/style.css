@@ -1624,10 +1624,9 @@ main {
 }
 
 .gm-linescore-table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
-  min-width: 320px;
 }
 
 .gm-linescore-table th,
@@ -1703,10 +1702,9 @@ main {
 .gm-stats-table-wrap { overflow-x: auto; }
 
 .gm-stats-table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.79rem;
-  min-width: 380px;
 }
 
 .gm-stats-table th {
