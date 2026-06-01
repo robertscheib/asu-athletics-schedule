@@ -286,7 +286,7 @@ function renderGameCard(game) {
     ? `<div class="live-card-score${!game.asuWinner && game.state === 'final' ? ' score-winner' : ''}">${esc(game.oppScore)}</div>` : '';
 
   const vsOrTime = game.state === 'upcoming'
-    ? `<div class="live-card-vs">${esc(formatGameTime(game.startTime))}</div>`
+    ? `<div class="live-card-vs">${esc(game.situation === 'TBD' ? 'TBD' : formatGameTime(game.startTime))}</div>`
     : `<div class="live-card-vs">–</div>`;
 
   const sportDetailsHtml = renderSportDetails(game);
@@ -1010,7 +1010,7 @@ function shortTitle(title) {
 function formatGameTime(ts) {
   if (!ts) return '';
   return new Date(ts * 1000).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix', timeZoneName: 'short',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
   });
 }
 
@@ -1018,7 +1018,7 @@ function formatGameDateTime(ts) {
   if (!ts) return '';
   return new Date(ts * 1000).toLocaleString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix', timeZoneName: 'short',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
   });
 }
 
