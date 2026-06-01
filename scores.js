@@ -117,6 +117,11 @@ function findDBMatch(scoreData, dbEvents, espnDate) {
 }
 
 function buildESPNEvent(espnEvent, sport, scoreData) {
+  const comp = espnEvent.competitions?.[0];
+  const venue = comp?.venue;
+  const broadcast = comp?.broadcasts?.[0]?.names?.[0]
+    || comp?.geoBroadcasts?.[0]?.media?.shortName
+    || null;
   const oppName = scoreData.espnOppName;
   const gameType = scoreData.neutralSite ? 'neutral'
     : scoreData.homeAway === 'home' ? 'home' : 'away';
@@ -132,14 +137,14 @@ function buildESPNEvent(espnEvent, sport, scoreData) {
     season: String(new Date(espnEvent.date).getFullYear()),
     start_date: startDate,
     end_date: null,
-    location_name: null,
+    location_name: venue?.fullName || null,
     venue_address: null,
-    city: null,
-    state: null,
+    city: venue?.address?.city || null,
+    state: venue?.address?.state || null,
     country: null,
     game_type: gameType,
     event_type: 'Game',
-    tv_network: null,
+    tv_network: broadcast,
     ticket_url: null,
     ticket_label: null,
     opponent_logo: scoreData.espnOppLogo,
@@ -581,7 +586,12 @@ async function fetchLiveGames() {
       // The 24h window keeps final scores visible after midnight without letting
       // off-season scoreboards (e.g. football) flood the feed with upcoming games.
       const todayPhoenix = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
-      const gameDay = new Date(espnEvent.date).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+      // TBD games use a midnight-ish UTC placeholder that shifts the date back in western timezones.
+      // Use the raw UTC date for those so "Jun 1 TBD" doesn't appear as May 31.
+      const isTBDGame = comp.status?.type?.shortDetail === 'TBD';
+      const gameDay = isTBDGame
+        ? espnEvent.date.slice(0, 10)
+        : new Date(espnEvent.date).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
       const isToday = gameDay === todayPhoenix;
       const isRecentFinal = state === 'post' && (Date.now() - new Date(espnEvent.date).getTime()) < 24 * 60 * 60 * 1000;
       if (!isToday && !isRecentFinal) continue;
@@ -632,9 +642,50 @@ async function fetchLiveGames() {
         || dbMatch?.tv_network
         || null;
 
+      // Auto-insert ESPN games not yet in the DB so they appear in list/calendar views.
+      // Happens for postseason/tournament games that the sundevils.com feed never emits.
+      let dbEventId = dbMatch?.id ?? null;
+      if (!dbMatch) {
+        const newEventId = `espn_${espnEvent.id}`;
+        const gameType = comp.neutralSite === true ? 'neutral'
+          : asuComp.homeAway === 'home' ? 'home' : 'away';
+        try {
+          upsertESPNEvent({
+            id: newEventId,
+            title,
+            sport: cfg.dbSport,
+            season: String(new Date(espnEvent.date).getFullYear()),
+            start_date: Math.floor(new Date(espnEvent.date).getTime() / 1000),
+            end_date: null,
+            location_name: venue?.fullName || null,
+            venue_address: null,
+            city: venue?.address?.city || null,
+            state: venue?.address?.state || null,
+            country: null,
+            game_type: gameType,
+            event_type: 'Game',
+            tv_network: broadcast,
+            ticket_url: null,
+            ticket_label: null,
+            opponent_logo: oppLogo,
+            badges: null,
+            image_url: null,
+            node_url: null,
+            updated_at: Date.now(),
+            asu_score: null,
+            opp_score: null,
+            result: null,
+          });
+          dbEventId = newEventId;
+          console.log(`[live] Auto-inserted ESPN game: ${title}`);
+        } catch (err) {
+          console.error(`[live] Auto-insert failed for ${espnEvent.id}:`, err.message);
+        }
+      }
+
       games.push({
         espnEventId: espnEvent.id,
-        dbEventId: dbMatch?.id ?? null,
+        dbEventId,
         sport: cfg.dbSport,
         title,
         state: gameState,

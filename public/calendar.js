@@ -1,14 +1,12 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const calEl = document.getElementById('calendar');
 
-  // Format today as YYYY-MM-DD in Phoenix local time so FullCalendar doesn't
-  // shift to tomorrow when the browser's UTC offset crosses midnight.
-  const todayPhoenix = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Phoenix' });
+  const todayLocal = new Date().toLocaleDateString('sv-SE');
 
   const calendar = new FullCalendar.Calendar(calEl, {
     initialView: window.innerWidth < 768 ? 'listWeek' : 'dayGridMonth',
-    initialDate: todayPhoenix,
-    timeZone: 'America/Phoenix',
+    initialDate: todayLocal,
+    timeZone: 'local',
     headerToolbar: {
       left: 'prev,next today',
       center: 'title',
@@ -70,12 +68,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 });
 
-function toPhoenixISO(ts) {
-  // Convert Unix timestamp (seconds) to a Phoenix-local ISO string (no Z suffix)
-  // so FullCalendar treats it as wall-clock time in the configured timeZone.
+function toLocalISO(ts) {
   const d = new Date(ts * 1000);
-  const local = d.toLocaleString('sv-SE', { timeZone: 'America/Phoenix' });
-  return local.replace(' ', 'T');
+  return d.toLocaleString('sv-SE').replace(' ', 'T');
 }
 
 async function loadCalendarEvents(fetchInfo, successCallback, failureCallback) {
@@ -84,8 +79,8 @@ async function loadCalendarEvents(fetchInfo, successCallback, failureCallback) {
     const mapped = events.map(e => ({
       id: e.id,
       title: shortTitle(e.title),
-      start: e.start_date ? toPhoenixISO(e.start_date) : null,
-      end: e.end_date ? toPhoenixISO(e.end_date) : null,
+      start: e.start_date ? toLocalISO(e.start_date) : null,
+      end: e.end_date ? toLocalISO(e.end_date) : null,
       backgroundColor: sportColor(e.sport),
       borderColor: sportColor(e.sport),
       textColor: '#fff',
@@ -136,7 +131,7 @@ async function renderListView() {
     for (const e of visibleEvents) {
       if (!e.start_date) continue;
       const d = new Date(e.start_date * 1000);
-      const key = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/Phoenix' });
+      const key = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
       if (!groups[key]) groups[key] = [];
       groups[key].push(e);
     }
@@ -196,7 +191,7 @@ function listEventHTML(e) {
   const color = sportColor(e.sport);
   const rawTime = e.start_date
     ? new Date(e.start_date * 1000).toLocaleTimeString('en-US',
-        { hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix' })
+        { hour: 'numeric', minute: '2-digit' })
     : '';
   const time = rawTime === '12:00 AM' ? '' : rawTime;
 
