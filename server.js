@@ -624,12 +624,12 @@ app.get('/api/events.ics', generalLimit, (req, res) => {
 // ── Cloudflare Analytics proxy ────────────────────────────────────────────────
 
 app.get('/api/cf-stats', generalLimit, async (req, res) => {
-  const token  = process.env.CF_API_TOKEN || process.env.CF_TOKEN;
-  const zoneId = process.env.CF_ZONE_ID;
-  if (!token || !zoneId) {
+  const token     = process.env.CF_API_TOKEN || process.env.CF_TOKEN;
+  const accountId = process.env.CF_ACCOUNT_ID;
+  if (!token || !accountId) {
     return res.status(503).json({
       error: 'Stats not configured',
-      missing: [!token && 'CF_API_TOKEN', !zoneId && 'CF_ZONE_ID'].filter(Boolean),
+      missing: [!token && 'CF_API_TOKEN', !accountId && 'CF_ACCOUNT_ID'].filter(Boolean),
     });
   }
 
@@ -642,26 +642,21 @@ app.get('/api/cf-stats', generalLimit, async (req, res) => {
   const endDate   = new Date().toISOString().slice(0, 10);
   const startDate = new Date(now - (days - 1) * 86400000).toISOString().slice(0, 10);
 
-  // Single httpRequests1dGroups query — supports full date range on all plan tiers.
-  // High-cardinality fields (path, referrer, device) require paid plans on the
-  // adaptive dataset, so we use the pre-aggregated maps available here instead.
+  // Cloudflare Web Analytics beacon data (rumPageloadEventsAdaptiveGroups).
+  // Scoped to asu.dikaiaserver.com via requestHost filter — excludes all other
+  // subdomains that also have beacons (jarvis, radar, etc.).
+  // Counts only real browser page loads, not CDN requests or API calls.
+  const host = 'asu.dikaiaserver.com';
+  const f    = `date_geq: "${startDate}", date_leq: "${endDate}", requestHost: "${host}"`;
   const query = `{
     viewer {
-      zones(filter: { zoneTag: "${zoneId}" }) {
-        trend: httpRequests1dGroups(
-          filter: { date_geq: "${startDate}", date_leq: "${endDate}" }
-          limit: 93 orderBy: [date_ASC]
-        ) {
-          dimensions { date }
-          sum {
-            requests pageViews bytes
-            countryMap     { clientCountryName requests }
-            browserMap     { uaBrowserFamily pageViews }
-            contentTypeMap { edgeResponseContentTypeName requests }
-            responseStatusMap    { edgeResponseStatus requests }
-            clientHTTPVersionMap { clientHTTPProtocol requests }
-          }
-        }
+      accounts(filter: { accountTag: "${accountId}" }) {
+        byDate:    rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 93  orderBy: [date_ASC]) { count dimensions { date } }
+        byCountry: rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 100) { count dimensions { countryName } }
+        byDevice:  rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 10)  { count dimensions { deviceType } }
+        byPath:    rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 30)  { count dimensions { requestPath } }
+        byReferrer:rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 20)  { count dimensions { refererHost } }
+        byBrowser: rumPageloadEventsAdaptiveGroups(filter: { ${f} } limit: 15)  { count dimensions { userAgentBrowser } }
       }
     }
   }`;
