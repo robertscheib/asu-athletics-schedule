@@ -2158,3 +2158,165 @@ main {
 @media (max-width: 768px) {
   .btn-subscribe .sub-label { display: none; }
 }
+
+/* ── Bell icon ─────────────────────────────────────────────────────────────── */
+
+.bell-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px 6px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+.bell-btn:hover { background: rgba(0,0,0,0.08); }
+.bell-btn.bell-disabled { opacity: 0.35; cursor: default; }
+.bell-btn.bell-off { opacity: 0.45; filter: grayscale(1); }
+.bell-btn.bell-on  { opacity: 1; }
+.bell-btn:disabled { opacity: 0.4; cursor: wait; }
+
+/* Bell in live card header */
+.live-card-header .bell-btn { margin-left: auto; }
+
+/* Bell in list view */
+.list-event-right .bell-btn { margin-top: 2px; }
+
+/* Bell in event modal */
+.modal-bell-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.modal-bell-row .bell-btn { font-size: 1.2rem; }
+.modal-bell-label { font-size: 0.85rem; color: var(--text-muted); }
+
+/* ── iOS install banner ────────────────────────────────────────────────────── */
+
+#ios-install-banner {
+  position: fixed;
+  bottom: env(safe-area-inset-bottom, 0);
+  left: 0; right: 0;
+  background: var(--maroon);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+  z-index: 9999;
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.3);
+  transform: translateY(110%);
+  transition: transform 0.35s ease;
+}
+#ios-install-banner.ios-banner-visible { transform: translateY(0); }
+
+.ios-banner-text {
+  flex: 1;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.9);
+}
+.ios-banner-text strong { color: var(--gold); }
+
+.ios-banner-dismiss {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+/* ── Offline banner ────────────────────────────────────────────────────────── */
+
+#offline-banner {
+  background: #d97706;
+  color: #fff;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 7px 16px;
+  position: sticky;
+  top: 56px; /* below the app header */
+  z-index: 99;
+  letter-spacing: 0.01em;
+}
+
+/* ── Install App sidebar section ───────────────────────────────────────────── */
+
+.install-app-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 4px;
+}
+
+.install-benefit {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.install-steps {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.install-steps li {
+  font-size: 0.82rem;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.install-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: var(--maroon);
+  color: #fff;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* ── Notifications sidebar section ─────────────────────────────────────────── */
+
+.btn-enable-notif {
+  width: 100%;
+  background: var(--maroon);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+  margin-top: 4px;
+}
+.btn-enable-notif:hover { background: var(--maroon-light); }
+
+.notif-sport-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  color: var(--text);
+  padding: 3px 0;
+  cursor: pointer;
+}
+.notif-sport-row input[type=checkbox] { accent-color: var(--maroon); }
+.notif-all-row { font-weight: 600; margin-bottom: 4px; }

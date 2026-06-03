@@ -777,6 +777,11 @@ function openEventModal(event) {
   }
 
   let actions = '';
+  const nowTs = Math.floor(Date.now() / 1000);
+  const isFuture = event.start_date && event.start_date > nowTs;
+  if (isFuture && typeof window.bellIconHTML === 'function') {
+    actions += `<div class="modal-bell-row">${window.bellIconHTML(event.id, true)}<span class="modal-bell-label">Notify me before this game</span></div>`;
+  }
   if (event.ticket_url) {
     actions += `<a class="modal-ticket-btn" href="${event.ticket_url}" target="_blank" rel="noopener">${event.ticket_label || 'Get Tickets'}</a>`;
   }

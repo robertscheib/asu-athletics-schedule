@@ -209,6 +209,12 @@ function listEventHTML(e) {
 
   const logoHTML = typeof eventLogoHTML === 'function' ? eventLogoHTML(e) : '';
 
+  const nowTs = Math.floor(Date.now() / 1000);
+  const isFuture = e.start_date && e.start_date > nowTs;
+  const bellHtml = isFuture && typeof window.bellIconHTML === 'function'
+    ? window.bellIconHTML(e.id, true)
+    : '';
+
   return `
     <div class="list-event-bar" style="background:${color}"></div>
     ${logoHTML}
@@ -226,6 +232,7 @@ function listEventHTML(e) {
       <div class="list-event-type">${capitalize(e.game_type || '')}${
         e.tv_network ? ' · ' + e.tv_network : ''
       }</div>
+      ${bellHtml}
     </div>
   `;
 }

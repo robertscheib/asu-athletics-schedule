@@ -12,6 +12,7 @@
     "express-rate-limit": "^8.5.1",
     "helmet": "^8.1.0",
     "node-cron": "^3.0.3",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "web-push": "^3.6.7"
   }
 }

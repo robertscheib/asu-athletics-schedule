@@ -54,11 +54,35 @@ db.exec(`
 
 // Migrate: add columns if they don't exist yet
 const existingCols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
-if (!existingCols.includes('asu_score')) db.exec('ALTER TABLE events ADD COLUMN asu_score TEXT');
-if (!existingCols.includes('opp_score')) db.exec('ALTER TABLE events ADD COLUMN opp_score TEXT');
-if (!existingCols.includes('result'))    db.exec('ALTER TABLE events ADD COLUMN result TEXT');
-if (!existingCols.includes('lat'))       db.exec('ALTER TABLE events ADD COLUMN lat REAL');
-if (!existingCols.includes('lng'))       db.exec('ALTER TABLE events ADD COLUMN lng REAL');
+if (!existingCols.includes('asu_score'))  db.exec('ALTER TABLE events ADD COLUMN asu_score TEXT');
+if (!existingCols.includes('opp_score'))  db.exec('ALTER TABLE events ADD COLUMN opp_score TEXT');
+if (!existingCols.includes('result'))     db.exec('ALTER TABLE events ADD COLUMN result TEXT');
+if (!existingCols.includes('lat'))        db.exec('ALTER TABLE events ADD COLUMN lat REAL');
+if (!existingCols.includes('lng'))        db.exec('ALTER TABLE events ADD COLUMN lng REAL');
+if (!existingCols.includes('push_sent'))  db.exec('ALTER TABLE events ADD COLUMN push_sent INTEGER NOT NULL DEFAULT 0');
+
+// ── Push subscription tables ──────────────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint    TEXT UNIQUE NOT NULL,
+    p256dh      TEXT NOT NULL,
+    auth        TEXT NOT NULL,
+    sport_prefs TEXT,
+    created_at  INTEGER NOT NULL
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS game_subscriptions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+    event_id        TEXT NOT NULL REFERENCES events(id),
+    created_at      INTEGER NOT NULL,
+    UNIQUE(subscription_id, event_id)
+  )
+`);
 
 const upsertEvent = db.prepare(`
   INSERT INTO events (
@@ -284,4 +308,84 @@ function deleteFeedback(id) {
   return db.prepare('DELETE FROM feedback WHERE id=@id').run({ id }).changes;
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback };
+// ── Push subscription helpers ─────────────────────────────────────────────────
+
+const _upsertPushSubStmt = db.prepare(`
+  INSERT INTO push_subscriptions (endpoint, p256dh, auth, sport_prefs, created_at)
+  VALUES (@endpoint, @p256dh, @auth, @sport_prefs, @created_at)
+  ON CONFLICT(endpoint) DO UPDATE SET
+    p256dh      = CASE WHEN excluded.p256dh != '' THEN excluded.p256dh ELSE p256dh END,
+    auth        = CASE WHEN excluded.auth   != '' THEN excluded.auth   ELSE auth   END,
+    sport_prefs = excluded.sport_prefs
+`);
+
+function upsertPushSubscription(endpoint, p256dh, auth, sportPrefs) {
+  _upsertPushSubStmt.run({
+    endpoint,
+    p256dh: p256dh || '',
+    auth:   auth   || '',
+    sport_prefs: sportPrefs != null ? JSON.stringify(sportPrefs) : null,
+    created_at: Math.floor(Date.now() / 1000),
+  });
+}
+
+function deletePushSubscription(endpoint) {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = @endpoint').run({ endpoint });
+}
+
+const _addGameSubStmt = db.prepare(`
+  INSERT OR IGNORE INTO game_subscriptions (subscription_id, event_id, created_at)
+  SELECT id, @event_id, @created_at FROM push_subscriptions WHERE endpoint = @endpoint
+`);
+
+function addGameSubscription(endpoint, eventId) {
+  _addGameSubStmt.run({ endpoint, event_id: eventId, created_at: Math.floor(Date.now() / 1000) });
+}
+
+function removeGameSubscription(endpoint, eventId) {
+  db.prepare(`
+    DELETE FROM game_subscriptions WHERE event_id = @event_id
+    AND subscription_id = (SELECT id FROM push_subscriptions WHERE endpoint = @endpoint)
+  `).run({ event_id: eventId, endpoint });
+}
+
+function getGameSubscribers(eventId) {
+  return db.prepare(`
+    SELECT ps.endpoint, ps.p256dh, ps.auth
+    FROM push_subscriptions ps
+    JOIN game_subscriptions gs ON gs.subscription_id = ps.id
+    WHERE gs.event_id = @event_id
+  `).all({ event_id: eventId });
+}
+
+function cleanupExpiredSubscriptions() {
+  const cutoff = Math.floor(Date.now() / 1000) - 86400;
+  const deleted = db.prepare(`
+    DELETE FROM game_subscriptions
+    WHERE event_id IN (SELECT id FROM events WHERE start_date < @cutoff)
+  `).run({ cutoff }).changes;
+
+  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 86400;
+  const orphans = db.prepare(`
+    DELETE FROM push_subscriptions
+    WHERE created_at < @cutoff
+    AND id NOT IN (SELECT DISTINCT subscription_id FROM game_subscriptions)
+  `).run({ cutoff: thirtyDaysAgo }).changes;
+
+  return { deleted, orphans };
+}
+
+function getEventsPendingPush() {
+  const now = Math.floor(Date.now() / 1000);
+  const windowEnd = now + 20 * 60;
+  return db.prepare(`
+    SELECT * FROM events
+    WHERE start_date >= @now AND start_date <= @windowEnd AND push_sent = 0
+  `).all({ now, windowEnd });
+}
+
+function markPushSent(eventId) {
+  db.prepare('UPDATE events SET push_sent = 1 WHERE id = @id').run({ id: eventId });
+}
+
+module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent };
