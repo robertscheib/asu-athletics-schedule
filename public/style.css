@@ -2320,3 +2320,61 @@ main {
 }
 .notif-sport-row input[type=checkbox] { accent-color: var(--maroon); }
 .notif-all-row { font-weight: 600; margin-bottom: 4px; }
+
+/* ── Bell error state ──────────────────────────────────────────────────────── */
+
+.bell-btn.bell-error {
+  filter: hue-rotate(180deg) saturate(2);
+  animation: bell-shake 0.4s ease;
+}
+@keyframes bell-shake {
+  0%,100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
+}
+
+/* ── PWA debug panel ───────────────────────────────────────────────────────── */
+
+#pwa-debug-panel {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 4px);
+  left: 4px;
+  right: 4px;
+  max-height: 220px;
+  background: rgba(0,0,0,0.88);
+  border-radius: 8px;
+  z-index: 99999;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #a8ff78;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.dbg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.07);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+.dbg-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.6);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.dbg-body {
+  margin: 0;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow-y: auto;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}

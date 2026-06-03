@@ -239,6 +239,7 @@ function _renderLiveView(games, tournaments, nextGame, records) {
 }
 
 function _handleCardClick(e) {
+  if (e.target.closest('[data-bell-event-id]')) return; // handled by pwa.js delegation
   const card = e.target.closest('[data-espn-id]');
   if (!card) return;
   const espnId = card.dataset.espnId;
@@ -303,8 +304,8 @@ function renderGameCard(game) {
   const nowTs = Math.floor(Date.now() / 1000);
   const isFuture = game.startTime && game.startTime > nowTs;
   const bellTooltip = game.state === 'live' ? 'Notify me when this game ends' : 'Subscribe to this game';
-  const bellHtml = window.bellIconHTML
-    ? window.bellIconHTML(game.dbEventId || '', isFuture || game.state === 'live', bellTooltip)
+  const bellHtml = game.dbEventId
+    ? window.bellIconHTML(game.dbEventId, isFuture || game.state === 'live', bellTooltip)
     : '';
 
   return `

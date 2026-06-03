@@ -1,5 +1,51 @@
 // pwa.js — Install banner, offline banner, push subscription, bell state
 
+// ── Debug panel ───────────────────────────────────────────────────────────────
+
+let _debugLines = [];
+let _debugPanelEl = null;
+
+function _pwaLog(level, msg) {
+  if (localStorage.getItem('pwaDebug') !== 'true') return;
+  const t = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const line = `${t} [${level}] ${msg}`;
+  _debugLines.push(line);
+  if (_debugLines.length > 12) _debugLines.shift();
+  const body = _debugPanelEl?.querySelector('.dbg-body');
+  if (body) body.textContent = _debugLines.join('\n');
+}
+
+function _initDebugPanel() {
+  if (localStorage.getItem('pwaDebug') !== 'true') return;
+
+  const panel = document.createElement('div');
+  panel.id = 'pwa-debug-panel';
+  panel.innerHTML = `
+    <div class="dbg-header">
+      <span>PWA Debug</span>
+      <button class="dbg-close" onclick="this.closest('#pwa-debug-panel').style.display='none'">✕</button>
+    </div>
+    <pre class="dbg-body"></pre>
+  `;
+  document.body.appendChild(panel);
+  _debugPanelEl = panel;
+
+  // Intercept console methods to mirror output into the panel
+  ['log', 'warn', 'error'].forEach(lvl => {
+    const orig = console[lvl].bind(console);
+    console[lvl] = (...args) => {
+      orig(...args);
+      _pwaLog(lvl, args.map(a => (a && typeof a === 'object') ? JSON.stringify(a) : String(a)).join(' '));
+    };
+  });
+
+  // Log initial diagnostic state
+  _pwaLog('log', `endpoint: ${localStorage.getItem('asu-push-endpoint') || 'null'}`);
+  _pwaLog('log', `standalone: ${window.navigator.standalone ?? 'n/a'}`);
+  _pwaLog('log', `SW: ${navigator.serviceWorker?.controller ? 'active' : 'none'}`);
+  _pwaLog('log', `permission: ${Notification?.permission ?? 'n/a'}`);
+}
+
 // ── Push subscription state ───────────────────────────────────────────────────
 
 const PUSH_ENDPOINT_KEY = 'asu-push-endpoint';
@@ -26,7 +72,6 @@ async function _initPushSubscription() {
     const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth'))));
     localStorage.setItem(PUSH_ENDPOINT_KEY, sub.endpoint);
 
-    // Upsert subscription server-side with current sport prefs
     const sportPrefs = _getSportPrefs();
     await fetch('/api/subscribe', {
       method: 'POST',
@@ -34,9 +79,11 @@ async function _initPushSubscription() {
       body: JSON.stringify({ endpoint: sub.endpoint, p256dh, auth, sportPrefs }),
     });
 
+    _pwaLog('log', '[pwa] Push subscription active');
     console.log('[pwa] Push subscription active');
     window.dispatchEvent(new CustomEvent('pwa-push-ready'));
   } catch (err) {
+    _pwaLog('error', `[pwa] Push subscription failed: ${err.message}`);
     console.warn('[pwa] Push subscription failed:', err.message);
   }
 }
@@ -64,71 +111,99 @@ function _saveSportPrefs(prefs) {
 // ── Bell icon state ───────────────────────────────────────────────────────────
 
 const _gameSubscriptions = new Set(
-  JSON.parse(localStorage.getItem('asu-game-subs') || '[]'),
+  (() => { try { return JSON.parse(localStorage.getItem('asu-game-subs') || '[]'); } catch { return []; } })(),
 );
 
 function _persistGameSubs() {
   try { localStorage.setItem('asu-game-subs', JSON.stringify([..._gameSubscriptions])); } catch {}
 }
 
-function isGameSubscribed(eventId) {
+window.isGameSubscribed = function(eventId) {
   return _gameSubscriptions.has(eventId);
-}
+};
 
-async function toggleGameSubscription(eventId, subscribeNow) {
-  const endpoint = window.getPushEndpoint();
-  if (!endpoint) return;
-
-  const method = subscribeNow ? 'POST' : 'DELETE';
-  const path = '/api/subscribe/game';
-
-  try {
-    await fetch(path, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, eventId }),
-    });
-    if (subscribeNow) {
-      _gameSubscriptions.add(eventId);
-    } else {
-      _gameSubscriptions.delete(eventId);
-    }
-    _persistGameSubs();
-  } catch (err) {
-    console.error('[pwa] toggleGameSubscription failed:', err.message);
-  }
-}
-
-// Bell HTML — call from list/live renderers
-// tooltip: optional override for the subscribe action label
+// Bell HTML — generates a button with data-bell-event-id for delegation.
+// No inline onclick; all clicks handled by the document delegated listener below.
+// Always renders (even disabled) so taps get feedback.
 function bellIconHTML(eventId, isFutureOrLive, tooltip) {
   if (!isFutureOrLive) return '';
-  const subLabel = tooltip || 'Subscribe to this game';
   const endpoint = window.getPushEndpoint();
-  if (!endpoint) {
-    return `<button class="bell-btn bell-disabled" title="Enable notifications to subscribe to this game" aria-label="Notifications disabled">🔕</button>`;
-  }
-  const subscribed = isGameSubscribed(eventId);
-  return `<button class="bell-btn ${subscribed ? 'bell-on' : 'bell-off'}" data-event-id="${eventId}" onclick="window.handleBellClick(event, this)" title="${subscribed ? 'Unsubscribe from this game' : subLabel}" aria-label="${subscribed ? 'Subscribed' : 'Subscribe'}">🔔</button>`;
+  const subscribed = endpoint ? _gameSubscriptions.has(eventId) : false;
+  const disabled = !endpoint;
+  const cls = disabled ? 'bell-disabled' : (subscribed ? 'bell-on' : 'bell-off');
+  const title = disabled
+    ? 'Enable notifications first'
+    : (subscribed ? 'Unsubscribe from this game' : (tooltip || 'Subscribe to this game'));
+  return `<button class="bell-btn ${cls}" data-bell-event-id="${eventId}" title="${title}" aria-label="${disabled ? 'Notifications disabled' : (subscribed ? 'Subscribed' : 'Subscribe')}">🔔</button>`;
 }
 
 window.bellIconHTML = bellIconHTML;
 
-window.handleBellClick = async function(e, btn) {
-  e.stopPropagation();
-  const eventId = btn.dataset.eventId;
-  if (!eventId) return;
-  const nowSubscribed = btn.classList.contains('bell-on');
-  const willSubscribe = !nowSubscribed;
-  btn.disabled = true;
-  await toggleGameSubscription(eventId, willSubscribe);
-  btn.disabled = false;
-  btn.classList.toggle('bell-on', willSubscribe);
-  btn.classList.toggle('bell-off', !willSubscribe);
-  btn.title = willSubscribe ? 'Unsubscribe from this game' : 'Subscribe to this game';
+// showBellError — briefly flash the bell and display message as tooltip
+window.showBellError = function(bellEl, message) {
+  _pwaLog('warn', `bell error: ${message}`);
+  if (!bellEl) return;
+  bellEl.classList.add('bell-error');
+  const prev = bellEl.title;
+  bellEl.title = message;
+  setTimeout(() => {
+    bellEl.classList.remove('bell-error');
+    bellEl.title = prev;
+  }, 3000);
 };
 
-window.isGameSubscribed = isGameSubscribed;
+// toggleGameSubscription — reads endpoint at click-time, updates bellEl on success
+window.toggleGameSubscription = async function(endpoint, eventId, bellEl) {
+  if (!endpoint) {
+    window.showBellError(bellEl, 'Enable notifications first');
+    return;
+  }
+  if (!eventId) {
+    window.showBellError(bellEl, 'Cannot subscribe to this game');
+    return;
+  }
+
+  const willSubscribe = !bellEl.classList.contains('bell-on');
+  bellEl.disabled = true;
+
+  try {
+    const res = await fetch('/api/subscribe/game', {
+      method: willSubscribe ? 'POST' : 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint, eventId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    if (willSubscribe) { _gameSubscriptions.add(eventId); }
+    else               { _gameSubscriptions.delete(eventId); }
+    _persistGameSubs();
+
+    bellEl.classList.remove('bell-disabled', 'bell-error');
+    bellEl.classList.toggle('bell-on',  willSubscribe);
+    bellEl.classList.toggle('bell-off', !willSubscribe);
+    bellEl.title = willSubscribe ? 'Unsubscribe from this game' : 'Subscribe to this game';
+    _pwaLog('log', `bell ${willSubscribe ? 'sub' : 'unsub'}: ${eventId}`);
+  } catch (err) {
+    _pwaLog('error', `bell toggle failed: ${err.message}`);
+    window.showBellError(bellEl, 'Failed — try again');
+  } finally {
+    bellEl.disabled = false;
+  }
+};
+
+// ── Document-level delegated bell click handler ───────────────────────────────
+// Handles ALL bells across list view, live tab, and event modal.
+// No inline onclick attributes needed on bell buttons.
+
+document.addEventListener('click', function(e) {
+  const bell = e.target.closest('[data-bell-event-id]');
+  if (!bell) return;
+  e.stopPropagation();
+  const eventId = bell.dataset.bellEventId;
+  const endpoint = window.getPushEndpoint();
+  _pwaLog('log', `bell click: eventId=${eventId} endpoint=${endpoint ? endpoint.slice(-12) : 'null'}`);
+  window.toggleGameSubscription(endpoint, eventId, bell);
+}, true); // capture phase — fires before any child/container handlers
 
 // ── Enable notifications button ───────────────────────────────────────────────
 
@@ -182,11 +257,9 @@ window._dismissIosBanner = function() {
 
 function _initOfflineBanner() {
   if (!('serviceWorker' in navigator)) return;
-
   navigator.serviceWorker.addEventListener('message', event => {
     if (event.data?.type === 'offline') _showOfflineBanner();
   });
-
   window.addEventListener('online', _hideOfflineBanner);
 }
 
@@ -230,11 +303,9 @@ function _renderNotifSection() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
 
-  const existing = document.getElementById('notif-section');
-  if (existing) existing.remove();
+  document.getElementById('notif-section')?.remove();
 
   const perm = Notification?.permission ?? 'default';
-
   const section = document.createElement('div');
   section.className = 'filter-group';
   section.id = 'notif-section';
@@ -255,18 +326,15 @@ function _renderNotifSection() {
     return;
   }
 
-  // Granted — show sport preference checkboxes
   const sportPrefs = _getSportPrefs();
   const allChecked = !sportPrefs;
-
-  let sportsHtml = '';
   const knownSports = [
     "Football", "Men's Basketball", "Women's Basketball",
     "Baseball", "Softball", "Soccer",
     "Swimming & Diving", "Track and Field", "Golf (Men's)", "Golf (Women's)",
     "Tennis (Men's)", "Tennis (Women's)", "Wrestling", "Gymnastics",
   ];
-  sportsHtml = knownSports.map(s => {
+  const sportsHtml = knownSports.map(s => {
     const checked = allChecked || sportPrefs?.includes(s);
     return `<label class="notif-sport-row"><input type="checkbox" value="${s}" ${checked ? 'checked' : ''} onchange="window._onSportPrefChange()"> ${s}</label>`;
   }).join('');
@@ -304,11 +372,10 @@ async function _postSportPrefs(prefs) {
   const endpoint = window.getPushEndpoint();
   if (!endpoint) return;
   try {
-    const p256dh = ''; const auth = '';
     await fetch('/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, p256dh, auth, sportPrefs: prefs }),
+      body: JSON.stringify({ endpoint, p256dh: '', auth: '', sportPrefs: prefs }),
     });
   } catch {}
 }
@@ -316,12 +383,12 @@ async function _postSportPrefs(prefs) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
+  _initDebugPanel();
   _initOfflineBanner();
   _showIosBanner();
   _renderInstallSection();
   _renderNotifSection();
 
-  // If already granted, attempt to restore/create subscription silently
   if (Notification?.permission === 'granted') {
     _swRegistration = _swRegistration || (await navigator.serviceWorker.ready.catch(() => null));
     await _initPushSubscription();
