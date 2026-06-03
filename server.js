@@ -1,13 +1,26 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fetch = require('node-fetch');
-const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback } = require('./db');
+const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
 const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
 const { startScheduler } = require('./scheduler');
+
+// ── Load VAPID env from secrets.env if not already set ───────────────────────
+if (!process.env.VAPID_PUBLIC_KEY) {
+  const secretsPath = path.join(process.env.HOME || '/root', 'projects/unifi-scripts/secrets.env');
+  try {
+    const lines = fs.readFileSync(secretsPath, 'utf8').split('\n');
+    for (const line of lines) {
+      const m = line.match(/^([A-Z_]+)=(.+)$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+    }
+  } catch {}
+}
 
 // ── In-memory caches ──────────────────────────────────────────────────────────
 const _espnGameCache       = new Map(); // espnEventId → {data, expiresAt}
@@ -179,6 +192,13 @@ const adminLimit = rateLimit({
 });
 
 app.use(express.json());
+
+// Service worker — must never be cached
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
 
 // Static files — no rate limiting
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -683,6 +703,62 @@ app.get('/api/cf-stats', generalLimit, async (req, res) => {
 
 app.get('/stats', generalLimit, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'stats.html'));
+});
+
+// ── Push notification API ─────────────────────────────────────────────────────
+
+app.get('/api/vapid-public-key', (req, res) => {
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  if (!publicKey) return res.status(503).json({ error: 'Push not configured' });
+  res.json({ publicKey });
+});
+
+app.post('/api/subscribe', generalLimit, (req, res) => {
+  try {
+    const { endpoint, p256dh, auth, sportPrefs } = req.body ?? {};
+    if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+    upsertPushSubscription(endpoint, p256dh, auth, Array.isArray(sportPrefs) ? sportPrefs : null);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/subscribe error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/unsubscribe', generalLimit, (req, res) => {
+  try {
+    const { endpoint } = req.body ?? {};
+    if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+    deletePushSubscription(endpoint);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/unsubscribe error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/subscribe/game', generalLimit, (req, res) => {
+  try {
+    const { endpoint, eventId } = req.body ?? {};
+    if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
+    addGameSubscription(endpoint, eventId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/subscribe/game error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/subscribe/game', generalLimit, (req, res) => {
+  try {
+    const { endpoint, eventId } = req.body ?? {};
+    if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
+    removeGameSubscription(endpoint, eventId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[api] /api/subscribe/game error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 startScheduler();

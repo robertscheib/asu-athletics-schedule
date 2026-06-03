@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" type="image/png" href="sparky.png" />
-  <link rel="apple-touch-icon" href="sparky.png" />
+  <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#8C1D40" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sun Devils" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <title>ASU Sun Devil Athletics Calendar</title>
 
   <!-- FullCalendar -->
@@ -144,7 +148,11 @@
 <script src="calendar.js?v=10"></script>
 <script src="map.js?v=2"></script>
 <script src="live.js?v=20"></script>
+<script src="pwa.js?v=1"></script>
 <script src="feedback.js" defer></script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
 
 </body>
 </html>

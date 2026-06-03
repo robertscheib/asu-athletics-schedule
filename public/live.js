@@ -300,12 +300,20 @@ function renderGameCard(game) {
   const locationHtml = locationParts.length
     ? `<div class="live-card-meta">📍 ${esc(locationParts[0])}</div>` : '';
 
+  const nowTs = Math.floor(Date.now() / 1000);
+  const isFuture = game.startTime && game.startTime > nowTs;
+  const bellTooltip = game.state === 'live' ? 'Notify me when this game ends' : 'Subscribe to this game';
+  const bellHtml = window.bellIconHTML
+    ? window.bellIconHTML(game.dbEventId || '', isFuture || game.state === 'live', bellTooltip)
+    : '';
+
   return `
     <div class="live-card ${stateClass}${clickableClass}" data-event-id="${esc(game.dbEventId || '')}" ${espnAttrs}>
       <div class="live-card-header">
         <span class="live-card-sport">${esc(game.sport)}</span>
         ${statusBadge}
         ${tvBadge}
+        ${bellHtml}
       </div>
       <div class="live-card-matchup">
         <div class="live-card-team">
@@ -965,6 +973,44 @@ document.addEventListener('visibilitychange', () => {
 startLivePolling();
 
 window.startLivePolling = startLivePolling;
+
+// ── Screen Wake Lock (live tab only) ─────────────────────────────────────────
+
+let _wakeLock = null;
+
+async function _acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  if (_wakeLock) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+  } catch {}
+}
+
+async function _releaseWakeLock() {
+  if (!_wakeLock) return;
+  try { await _wakeLock.release(); } catch {}
+  _wakeLock = null;
+}
+
+function _onLiveTabVisibility() {
+  const liveEl = document.getElementById('live-view');
+  const liveVisible = liveEl && liveEl.style.display === 'block';
+  if (liveVisible && !document.hidden) {
+    _acquireWakeLock();
+  } else {
+    _releaseWakeLock();
+  }
+}
+
+document.addEventListener('visibilitychange', _onLiveTabVisibility);
+
+// Also hook into setView so switching to live tab acquires the lock
+const _origSetView = window.setView;
+window.setView = function(view) {
+  if (_origSetView) _origSetView(view);
+  _onLiveTabVisibility();
+};
 
 // Called by setView('live') in filters.js
 window.renderLiveView = function() {
