@@ -389,6 +389,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   _renderInstallSection();
   _renderNotifSection();
 
+  // iOS Safari fallback for modal bells.
+  // On iOS, the document capture-phase handler (above) can be bypassed when the
+  // click target is inside a position:fixed element that has its own onclick —
+  // exactly the case for #modal-overlay (onclick="closeModal(event)").
+  // This bubble-phase listener on #modal fires reliably in that scenario.
+  // On desktop the document capture handler fires first and calls stopPropagation,
+  // so the event never bubbles here — no double-fire.
+  const _modalEl = document.getElementById('modal');
+  if (_modalEl) {
+    _modalEl.addEventListener('click', function(e) {
+      const bell = e.target.closest('[data-bell-event-id]');
+      if (!bell) return;
+      e.stopPropagation();
+      const eventId = bell.dataset.bellEventId;
+      const endpoint = window.getPushEndpoint();
+      _pwaLog('log', `modal bell: eventId=${eventId} endpoint=${endpoint ? endpoint.slice(-12) : 'null'}`);
+      window.toggleGameSubscription(endpoint, eventId, bell);
+    });
+  }
+
   if (Notification?.permission === 'granted') {
     _swRegistration = _swRegistration || (await navigator.serviceWorker.ready.catch(() => null));
     await _initPushSubscription();
