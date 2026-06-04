@@ -2173,7 +2173,7 @@ main {
   flex-shrink: 0;
 }
 .bell-btn:hover { background: rgba(0,0,0,0.08); }
-.bell-btn.bell-disabled { opacity: 0.35; cursor: default; }
+.bell-btn.bell-disabled { opacity: 0.35; cursor: not-allowed; }
 .bell-btn.bell-off { opacity: 0.45; filter: grayscale(1); }
 .bell-btn.bell-on  { opacity: 1; }
 .bell-btn:disabled { opacity: 0.4; cursor: wait; }
