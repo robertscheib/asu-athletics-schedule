@@ -402,6 +402,25 @@ function markFinalPushSent(eventId) {
   db.prepare('UPDATE events SET final_push_sent = 1 WHERE id = @id').run({ id: eventId });
 }
 
+// Returns true if any subscribed game has a start_date within the active window:
+// (now - 4h) to (now + 30min). The 4h lookback catches games that started up to
+// 4 hours ago but whose final score hasn't been written yet. Gate prevents the
+// bg-poll cron from calling ESPN on days with no games in progress.
+function getActiveGameWindows() {
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - 4 * 3600;
+  const windowEnd   = now + 30 * 60;
+  const row = db.prepare(`
+    SELECT 1 FROM events
+    WHERE start_date >= @windowStart
+      AND start_date <= @windowEnd
+      AND final_push_sent = 0
+      AND EXISTS (SELECT 1 FROM game_subscriptions gs WHERE gs.event_id = events.id)
+    LIMIT 1
+  `).get({ windowStart, windowEnd });
+  return !!row;
+}
+
 function getEndedGamesWithSubscribers() {
   return db.prepare(`
     SELECT e.id, e.title, e.sport, e.asu_score, e.opp_score, e.result, e.game_type
@@ -412,4 +431,4 @@ function getEndedGamesWithSubscribers() {
   `).all();
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers };
+module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows };

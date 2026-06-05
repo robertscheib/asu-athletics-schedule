@@ -1,10 +1,59 @@
 const cron = require('node-cron');
 const { fetchAndStore } = require('./fetcher');
-const { fetchAndStoreScores } = require('./scores');
-const { getEventCount, getEventsPendingPush, markPushSent, cleanupExpiredSubscriptions, getGameSubscribers, getEndedGamesWithSubscribers } = require('./db');
+const { fetchAndStoreScores, fetchAndStoreLiveScores } = require('./scores');
+const { getEventCount, getEventsPendingPush, markPushSent, cleanupExpiredSubscriptions, getGameSubscribers, getEndedGamesWithSubscribers, getActiveGameWindows } = require('./db');
 const { geocodeAllMissing } = require('./geocoder');
 
+// ── Cron job schedule ──────────────────────────────────────────────────────────
+//
+//  */2  8-23  * * *  Background score poller            (Phase 3)
+//    → Calls ESPN directly, writes game_status + scores to DB
+//    → Only runs when subscribed games are in active windows
+//    → Does NOT send pushes
+//
+//  */3  8-23  * * *  Final score push trigger            (Phase 2)
+//    → Reads DB for game_status = 'post' + final_push_sent = 0
+//    → Calls sendGameFinalAlert() for each match
+//    → Sets final_push_sent = 1
+//
+//  */5  8-23  * * *  Game-start push trigger             (Phase 1)
+//    → Reads DB for games starting within 20 min + push_sent = 0
+//    → Calls sendGameStartAlert()
+//    → Sets push_sent = 1
+//
+//  0 3   *  *  *     Subscription cleanup               (Phase 1)
+//    → Deletes expired game_subscriptions + orphaned push_subscriptions
+//
+//  The */2 and */3 jobs are intentionally decoupled:
+//    - */2 writes scores to DB, never sends pushes
+//    - */3 reads DB scores, sends push notifications
+//  Maximum latency from game end to notification: ~5 minutes
+//  (2-min poll interval + 3-min push check interval).
+
+let bgPollRunning = false;
+
 function startScheduler() {
+  // Every 2 minutes during game hours: background score poller
+  cron.schedule('*/2 8-23 * * *', async () => {
+    if (bgPollRunning) {
+      console.log('[bg-poll] Already running — skipping tick');
+      return;
+    }
+    bgPollRunning = true;
+    try {
+      if (!getActiveGameWindows()) {
+        console.log('[bg-poll] No active game windows — skipping');
+        return;
+      }
+      const { fetched, written } = await fetchAndStoreLiveScores();
+      console.log(`[bg-poll] Fetched ${fetched} game(s), wrote ${written} DB update(s)`);
+    } catch (err) {
+      console.error(`[bg-poll] ESPN fetch failed: ${err.message}`);
+    } finally {
+      bgPollRunning = false;
+    }
+  });
+
   // Nightly at 2am server local time
   cron.schedule('0 2 * * *', async () => {
     console.log('[scheduler] Running nightly fetch');

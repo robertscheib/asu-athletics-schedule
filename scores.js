@@ -732,6 +732,62 @@ async function fetchLiveGames() {
   return { games, tournaments };
 }
 
+// fetchAndStoreLiveScores — lightweight background poller (Phase 3).
+// Fetches ESPN scoreboards for all sports, writes final scores + game_status
+// to DB for completed ASU games. No tournament bracket logic, no game objects
+// returned — this is a pure DB-write path for the background scheduler.
+// Returns { fetched, written }: fetched = ASU games seen, written = DB rows updated.
+async function fetchAndStoreLiveScores() {
+  let fetched = 0;
+  let written = 0;
+
+  for (const cfg of ALL_LIVE_CONFIGS) {
+    let scoreboard;
+    try {
+      scoreboard = await fetchLiveScoreboard(cfg.espnPath);
+    } catch (err) {
+      console.error(`[bg-poll] ${cfg.dbSport}: fetch failed:`, err.message);
+      continue;
+    }
+
+    const dbEvents = queryEvents({ sport: cfg.dbSport });
+
+    for (const espnEvent of scoreboard) {
+      const comp = espnEvent.competitions?.[0];
+      if (!comp) continue;
+
+      const asuComp = comp.competitors?.find(c =>
+        c.team?.displayName?.toLowerCase().includes('arizona state')
+      );
+      if (!asuComp) continue;
+
+      fetched++;
+
+      if (comp.status?.type?.state !== 'post') continue;
+
+      const scoreData = extractScore(espnEvent);
+      if (!scoreData) continue;
+
+      const dbMatch = findDBMatch(scoreData, dbEvents, new Date(espnEvent.date));
+      if (!dbMatch) continue;
+
+      if (dbMatch.result !== scoreData.result ||
+          dbMatch.asu_score !== scoreData.asu_score ||
+          dbMatch.opp_score !== scoreData.opp_score) {
+        updateScore(dbMatch.id, scoreData.asu_score, scoreData.opp_score, scoreData.result);
+        written++;
+      }
+      if (dbMatch.game_status !== 'post') {
+        updateGameStatus(dbMatch.id, 'post');
+        written++;
+        console.log(`[bg-poll] wrote final: ${dbMatch.title} ASU ${scoreData.asu_score}–${scoreData.opp_score}`);
+      }
+    }
+  }
+
+  return { fetched, written };
+}
+
 async function fetchAndStoreScores() {
   let updated = 0;
   let inserted = 0;
@@ -779,4 +835,4 @@ async function fetchAndStoreScores() {
   return { updated, inserted };
 }
 
-module.exports = { fetchAndStoreScores, fetchLiveGames, TOURNAMENT_RE };
+module.exports = { fetchAndStoreScores, fetchAndStoreLiveScores, fetchLiveGames, TOURNAMENT_RE };
