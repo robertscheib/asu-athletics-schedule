@@ -70,7 +70,7 @@ async function _initPushSubscription() {
     }
     const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh'))));
     const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth'))));
-    localStorage.setItem(PUSH_ENDPOINT_KEY, sub.endpoint);
+    if (localStorage.getItem(PUSH_ENDPOINT_KEY) === sub.endpoint) return;
 
     const sportPrefs = _getSportPrefs();
     await fetch('/api/subscribe', {
@@ -78,6 +78,7 @@ async function _initPushSubscription() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: sub.endpoint, p256dh, auth, sportPrefs }),
     });
+    localStorage.setItem(PUSH_ENDPOINT_KEY, sub.endpoint);
 
     _pwaLog('log', '[pwa] Push subscription active');
     console.log('[pwa] Push subscription active');

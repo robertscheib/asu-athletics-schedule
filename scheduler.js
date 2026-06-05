@@ -81,7 +81,7 @@ function startScheduler() {
       const events = getEventsPendingPush();
       for (const event of events) {
         const subscribers = getGameSubscribers(event.id);
-        if (!subscribers.length) { markPushSent(event.id); continue; }
+        if (!subscribers.length) continue;
         await push.sendGameStartAlert(event);
         markPushSent(event.id);
       }

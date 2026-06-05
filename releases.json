@@ -1,6 +1,17 @@
 {
   "releases": [
     {
+      "version": "1.1.3",
+      "date": "2026-06-04",
+      "title": "Bug Fixes",
+      "features": [
+        "Push subscription race condition fixed — bell subscriptions no longer silently drop",
+        "Final-score alerts no longer fire for pre-existing old games",
+        "Game-start alerts skip zero-subscriber games without marking them sent",
+        "Service worker pre-cache no longer lists versioned JS/CSS paths it can never match"
+      ]
+    },
+    {
       "version": "1.1.2",
       "date": "2026-06-04",
       "title": "Countdown Improvements",

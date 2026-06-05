@@ -1,13 +1,12 @@
-const CACHE_NAME = 'asu-cal-v2';
+const CACHE_NAME = 'asu-cal-v3';
 const OFFLINE_CHANNEL = 'asu-offline';
 
+// JS and CSS files are loaded with versioned query params (e.g. live.js?v=22).
+// caches.match does exact URL matching (ignoreSearch:false by default), so bare
+// paths like /live.js never match a request for /live.js?v=22. Only include
+// resources that are requested without query params.
 const SHELL_URLS = [
   '/',
-  '/calendar.js',
-  '/filters.js',
-  '/live.js',
-  '/map.js',
-  '/style.css',
   '/manifest.json',
   '/sparky.png',
   '/icons/icon-192.png',
