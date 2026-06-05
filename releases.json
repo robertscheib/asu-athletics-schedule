@@ -1,6 +1,17 @@
 {
   "releases": [
     {
+      "version": "1.1.4",
+      "date": "2026-06-04",
+      "title": "Granular Notification Options",
+      "features": [
+        "Bell now opens a menu to choose which alerts you want per game",
+        "Choose from: Game start (15 min before), Score updates, and Final score",
+        "Score update labels are sport-aware — shows 'Inning updates' for baseball/softball",
+        "Live score changes during games now trigger score update notifications"
+      ]
+    },
+    {
       "version": "1.1.3",
       "date": "2026-06-04",
       "title": "Bug Fixes",

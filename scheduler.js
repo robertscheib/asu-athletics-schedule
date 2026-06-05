@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const { fetchAndStore } = require('./fetcher');
 const { fetchAndStoreScores, fetchAndStoreLiveScores } = require('./scores');
-const { getEventCount, getEventsPendingPush, markPushSent, cleanupExpiredSubscriptions, getGameSubscribers, getEndedGamesWithSubscribers, getActiveGameWindows } = require('./db');
+const { getEventCount, getEventsPendingPush, markPushSent, cleanupExpiredSubscriptions, getGameSubscribers, getGameSubscribersForType, getEndedGamesWithSubscribers, getActiveGameWindows } = require('./db');
 const { geocodeAllMissing } = require('./geocoder');
 
 // ── Cron job schedule ──────────────────────────────────────────────────────────
@@ -45,8 +45,20 @@ function startScheduler() {
         console.log('[bg-poll] No active game windows — skipping');
         return;
       }
-      const { fetched, written } = await fetchAndStoreLiveScores();
+      const { fetched, written, scoreChanges } = await fetchAndStoreLiveScores();
       console.log(`[bg-poll] Fetched ${fetched} game(s), wrote ${written} DB update(s)`);
+      if (scoreChanges.length) {
+        let push;
+        try { push = require('./push'); } catch (err) {
+          console.error('[bg-poll] push module load failed:', err.message);
+        }
+        if (push) {
+          for (const change of scoreChanges) {
+            const subs = getGameSubscribersForType(change.eventId, 'score_update');
+            if (subs.length) await push.sendScoreUpdateAlert(change, subs);
+          }
+        }
+      }
     } catch (err) {
       console.error(`[bg-poll] ESPN fetch failed: ${err.message}`);
     } finally {
@@ -80,9 +92,9 @@ function startScheduler() {
     try {
       const events = getEventsPendingPush();
       for (const event of events) {
-        const subscribers = getGameSubscribers(event.id);
+        const subscribers = getGameSubscribersForType(event.id, 'game_start');
         if (!subscribers.length) continue;
-        await push.sendGameStartAlert(event);
+        await push.sendGameStartAlert(event, subscribers);
         markPushSent(event.id);
       }
       if (events.length) console.log(`[scheduler] push: sent alerts for ${events.length} event(s)`);

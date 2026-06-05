@@ -85,6 +85,7 @@ db.exec(`
     UNIQUE(subscription_id, event_id)
   )
 `);
+try { db.exec('ALTER TABLE game_subscriptions ADD COLUMN notification_types TEXT'); } catch {}
 
 const upsertEvent = db.prepare(`
   INSERT INTO events (
@@ -335,13 +336,13 @@ function deletePushSubscription(endpoint) {
   db.prepare('DELETE FROM push_subscriptions WHERE endpoint = @endpoint').run({ endpoint });
 }
 
-const _addGameSubStmt = db.prepare(`
-  INSERT OR IGNORE INTO game_subscriptions (subscription_id, event_id, created_at)
-  SELECT id, @event_id, @created_at FROM push_subscriptions WHERE endpoint = @endpoint
-`);
-
-function addGameSubscription(endpoint, eventId) {
-  _addGameSubStmt.run({ endpoint, event_id: eventId, created_at: Math.floor(Date.now() / 1000) });
+function addGameSubscription(endpoint, eventId, types) {
+  const typesJson = Array.isArray(types) && types.length ? JSON.stringify(types) : null;
+  db.prepare(`
+    INSERT INTO game_subscriptions (subscription_id, event_id, created_at, notification_types)
+    SELECT id, @event_id, @created_at, @types FROM push_subscriptions WHERE endpoint = @endpoint
+    ON CONFLICT(subscription_id, event_id) DO UPDATE SET notification_types = @types
+  `).run({ endpoint, event_id: eventId, created_at: Math.floor(Date.now() / 1000), types: typesJson });
 }
 
 function removeGameSubscription(endpoint, eventId) {
@@ -353,11 +354,25 @@ function removeGameSubscription(endpoint, eventId) {
 
 function getGameSubscribers(eventId) {
   return db.prepare(`
-    SELECT ps.endpoint, ps.p256dh, ps.auth
+    SELECT ps.endpoint, ps.p256dh, ps.auth, gs.notification_types
     FROM push_subscriptions ps
     JOIN game_subscriptions gs ON gs.subscription_id = ps.id
     WHERE gs.event_id = @event_id
   `).all({ event_id: eventId });
+}
+
+function getGameSubscribersForType(eventId, type) {
+  return getGameSubscribers(eventId).filter(row => {
+    const types = row.notification_types
+      ? JSON.parse(row.notification_types)
+      : ['game_start', 'final_score'];
+    return types.includes(type);
+  });
+}
+
+function updateLiveScore(id, asuScore, oppScore) {
+  db.prepare('UPDATE events SET asu_score = @asu, opp_score = @opp WHERE id = @id')
+    .run({ id, asu: asuScore, opp: oppScore });
 }
 
 function cleanupExpiredSubscriptions() {
@@ -437,4 +452,4 @@ function hasPushSubscription(endpoint) {
   return !!db.prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint').get({ endpoint });
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows, hasPushSubscription };
+module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, updateLiveScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, getGameSubscribersForType, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows, hasPushSubscription };

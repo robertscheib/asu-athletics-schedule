@@ -1,5 +1,5 @@
 const webpush = require('web-push');
-const { getGameSubscribers, deletePushSubscription, getEventById, markFinalPushSent } = require('./db');
+const { getGameSubscribersForType, deletePushSubscription, getEventById, markFinalPushSent } = require('./db');
 
 const SPORT_EMOJI = {
   'Football':             '🏈',
@@ -45,8 +45,8 @@ function buildPayload(event) {
   };
 }
 
-async function sendGameStartAlert(eventRow) {
-  const subscribers = getGameSubscribers(eventRow.id);
+async function sendGameStartAlert(eventRow, subscribers) {
+  if (!subscribers) subscribers = getGameSubscribersForType(eventRow.id, 'game_start');
   if (!subscribers.length) return;
 
   webpush.setVapidDetails(
@@ -97,7 +97,7 @@ async function sendGameFinalAlert(eventId) {
     return;
   }
 
-  const subscribers = getGameSubscribers(eventId);
+  const subscribers = getGameSubscribersForType(eventId, 'final_score');
   if (!subscribers.length) {
     markFinalPushSent(eventId);
     return;
@@ -154,4 +154,50 @@ async function sendGameFinalAlert(eventId) {
   console.log(`[push] final alert event=${eventId} sport=${event.sport} sent=${sent} failed=${failed}`);
 }
 
-module.exports = { sendGameStartAlert, sendGameFinalAlert };
+async function sendScoreUpdateAlert(change, subscribers) {
+  if (!subscribers.length) return;
+
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@example.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY,
+  );
+
+  const emoji = SPORT_EMOJI[change.sport] || '🏟️';
+  const opponent = _opponentFromTitle(change.title);
+  const asuN = parseInt(change.asuScore, 10);
+  const oppN = parseInt(change.oppScore, 10);
+  const situation = !isNaN(asuN) && !isNaN(oppN)
+    ? (asuN > oppN ? 'leads' : asuN < oppN ? 'trails' : 'tied')
+    : '';
+
+  const title = `${emoji} ASU ${situation ? situation + ' ' : ''}${change.asuScore}–${change.oppScore}`;
+  const body = change.statusDetail
+    ? `${change.statusDetail} · Tap for live updates`
+    : 'Score update · Tap for live updates';
+
+  const payload = JSON.stringify({
+    web_push: 8030,
+    notification: { title, body, icon: '/icons/icon-192.png', navigate: 'https://asu.dikaiaserver.com' },
+  });
+
+  let sent = 0;
+  for (const sub of subscribers) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload,
+      );
+      sent++;
+    } catch (err) {
+      if (err.statusCode === 410) {
+        try { deletePushSubscription(sub.endpoint); } catch {}
+      } else {
+        console.error(`[push] score-update send failed for ${sub.endpoint.slice(-20)}: ${err.message}`);
+      }
+    }
+  }
+  console.log(`[push] score-update event=${change.eventId} sent=${sent}`);
+}
+
+module.exports = { sendGameStartAlert, sendGameFinalAlert, sendScoreUpdateAlert };

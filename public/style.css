@@ -2196,6 +2196,52 @@ main {
 .modal-bell-row .bell-btn { font-size: 1.2rem; }
 .modal-bell-label { font-size: 0.85rem; color: var(--text-muted); }
 
+/* ── Bell notification menu ─────────────────────────────────────────────────── */
+
+.bell-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  padding: 8px 0 6px;
+  min-width: 220px;
+  font-size: 0.85rem;
+  font-family: var(--font-body);
+  user-select: none;
+}
+.bell-menu-header {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 0 14px 6px;
+}
+.bell-menu-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.bell-menu-row:hover { background: var(--bg); }
+.bell-menu-row input[type=checkbox] {
+  accent-color: var(--maroon);
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bell-menu-row span { line-height: 1.3; }
+.bell-menu-hint {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
 /* ── iOS install banner ────────────────────────────────────────────────────── */
 
 #ios-install-banner {

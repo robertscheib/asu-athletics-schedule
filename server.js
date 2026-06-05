@@ -742,11 +742,17 @@ app.post('/api/unsubscribe', generalLimit, (req, res) => {
 
 app.post('/api/subscribe/game', generalLimit, (req, res) => {
   try {
-    const { endpoint, eventId } = req.body ?? {};
+    const { endpoint, eventId, types } = req.body ?? {};
     if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
     if (!hasPushSubscription(endpoint)) return res.status(409).json({ error: 'push subscription not found — register device first' });
-    addGameSubscription(endpoint, eventId);
-    res.json({ success: true });
+    const validTypes = ['game_start', 'score_update', 'final_score'];
+    const safeTypes = Array.isArray(types) ? types.filter(t => validTypes.includes(t)) : null;
+    if (!safeTypes || !safeTypes.length) {
+      removeGameSubscription(endpoint, eventId);
+      return res.json({ success: true, action: 'unsubscribed' });
+    }
+    addGameSubscription(endpoint, eventId, safeTypes);
+    res.json({ success: true, action: 'subscribed' });
   } catch (err) {
     console.error('[api] /api/subscribe/game error:', err.message);
     res.status(500).json({ error: err.message });

@@ -111,31 +111,41 @@ function _saveSportPrefs(prefs) {
 
 // ── Bell icon state ───────────────────────────────────────────────────────────
 
-const _gameSubscriptions = new Set(
-  (() => { try { return JSON.parse(localStorage.getItem('asu-game-subs') || '[]'); } catch { return []; } })(),
-);
+// _gameSubscriptions: Map<eventId, string[]> — notification type arrays per game.
+// Migrates from old Set format (array of strings) to new Map format automatically.
+const _gameSubscriptions = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('asu-game-subs') || '[]');
+    if (!stored.length) return new Map();
+    if (typeof stored[0] === 'string') {
+      // Old Set format: ['id1', 'id2'] → Map with legacy defaults
+      return new Map(stored.map(id => [id, ['game_start', 'final_score']]));
+    }
+    return new Map(stored);
+  } catch { return new Map(); }
+})();
 
 function _persistGameSubs() {
   try { localStorage.setItem('asu-game-subs', JSON.stringify([..._gameSubscriptions])); } catch {}
 }
 
 window.isGameSubscribed = function(eventId) {
-  return _gameSubscriptions.has(eventId);
+  const types = _gameSubscriptions.get(eventId);
+  return !!(types && types.length);
 };
 
 // Bell HTML — generates a button with data-bell-event-id for delegation.
-// No inline onclick; all clicks handled by the document delegated listener below.
-// Always renders (even disabled) so taps get feedback.
-function bellIconHTML(eventId, isFutureOrLive, tooltip) {
+function bellIconHTML(eventId, isFutureOrLive, tooltip, sport) {
   if (!isFutureOrLive) return '';
   const endpoint = window.getPushEndpoint();
-  const subscribed = endpoint ? _gameSubscriptions.has(eventId) : false;
+  const types = endpoint ? (_gameSubscriptions.get(eventId) || []) : [];
+  const subscribed = types.length > 0;
   const disabled = !endpoint;
   const cls = disabled ? 'bell-disabled' : (subscribed ? 'bell-on' : 'bell-off');
-  const title = disabled
-    ? 'Enable notifications first'
-    : (subscribed ? 'Unsubscribe from this game' : (tooltip || 'Subscribe to this game'));
-  return `<button class="bell-btn ${cls}" data-bell-event-id="${eventId}" title="${title}" aria-label="${disabled ? 'Notifications disabled' : (subscribed ? 'Subscribed' : 'Subscribe')}">🔔</button>`;
+  const title = disabled ? 'Enable notifications first'
+    : (subscribed ? 'Notification options' : (tooltip || 'Get game alerts'));
+  const sportAttr = sport ? ` data-bell-sport="${sport}"` : '';
+  return `<button class="bell-btn ${cls}" data-bell-event-id="${eventId}"${sportAttr} title="${title}" aria-label="${disabled ? 'Notifications disabled' : (subscribed ? 'Notification options' : 'Get game alerts')}">🔔</button>`;
 }
 
 window.bellIconHTML = bellIconHTML;
@@ -147,64 +157,119 @@ window.showBellError = function(bellEl, message) {
   bellEl.classList.add('bell-error');
   const prev = bellEl.title;
   bellEl.title = message;
-  setTimeout(() => {
-    bellEl.classList.remove('bell-error');
-    bellEl.title = prev;
-  }, 3000);
+  setTimeout(() => { bellEl.classList.remove('bell-error'); bellEl.title = prev; }, 3000);
 };
 
-// toggleGameSubscription — reads endpoint at click-time, updates bellEl on success
-window.toggleGameSubscription = async function(endpoint, eventId, bellEl) {
-  if (!endpoint) {
-    window.showBellError(bellEl, 'Enable notifications first');
-    return;
-  }
-  if (!eventId) {
-    window.showBellError(bellEl, 'Cannot subscribe to this game');
-    return;
-  }
+// ── Bell notification menu ────────────────────────────────────────────────────
 
-  const willSubscribe = !bellEl.classList.contains('bell-on');
-  bellEl.disabled = true;
+let _activeBellEl = null;
 
+function _scoreUpdateLabel(sport) {
+  if (/baseball|softball/i.test(sport || '')) return 'Inning updates';
+  return 'Score updates';
+}
+
+function _openBellMenu(bellEl, eventId, sport) {
+  _closeBellMenu();
+
+  const endpoint = window.getPushEndpoint();
+  if (!endpoint) { window.showBellError(bellEl, 'Enable notifications first'); return; }
+
+  const currentTypes = _gameSubscriptions.get(eventId) || [];
+  const ck = t => currentTypes.includes(t) ? ' checked' : '';
+
+  const menu = document.createElement('div');
+  menu.id = 'bell-menu';
+  menu.className = 'bell-menu';
+  menu.innerHTML = `
+    <div class="bell-menu-header">Notify me for</div>
+    <label class="bell-menu-row">
+      <input type="checkbox" data-btype="game_start"${ck('game_start')}>
+      <span>Game start<span class="bell-menu-hint">15 min before tip-off</span></span>
+    </label>
+    <label class="bell-menu-row">
+      <input type="checkbox" data-btype="score_update"${ck('score_update')}>
+      <span>${_scoreUpdateLabel(sport)}</span>
+    </label>
+    <label class="bell-menu-row">
+      <input type="checkbox" data-btype="final_score"${ck('final_score')}>
+      <span>Final score</span>
+    </label>
+  `;
+
+  document.body.appendChild(menu);
+  _activeBellEl = bellEl;
+
+  // Position: right-align with bell, just below it
+  const rect = bellEl.getBoundingClientRect();
+  const w = 230;
+  let left = rect.right - w;
+  if (left < 8) left = 8;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+  menu.style.cssText = `position:fixed;left:${Math.round(left)}px;top:${Math.round(rect.bottom + 6)}px;z-index:9999`;
+
+  menu.addEventListener('change', async () => {
+    const newTypes = [...menu.querySelectorAll('[data-btype]:checked')].map(c => c.dataset.btype);
+    await _applyBellTypes(endpoint, eventId, newTypes, bellEl);
+  });
+
+  menu.addEventListener('click', e => e.stopPropagation());
+}
+
+function _closeBellMenu() {
+  document.getElementById('bell-menu')?.remove();
+  _activeBellEl = null;
+}
+
+async function _applyBellTypes(endpoint, eventId, types, bellEl) {
   try {
     const res = await fetch('/api/subscribe/game', {
-      method: willSubscribe ? 'POST' : 'DELETE',
+      method: types.length ? 'POST' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, eventId }),
+      body: JSON.stringify({ endpoint, eventId, types }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    if (willSubscribe) { _gameSubscriptions.add(eventId); }
-    else               { _gameSubscriptions.delete(eventId); }
+    if (types.length) { _gameSubscriptions.set(eventId, types); }
+    else              { _gameSubscriptions.delete(eventId); }
     _persistGameSubs();
 
+    const subscribed = types.length > 0;
     bellEl.classList.remove('bell-disabled', 'bell-error');
-    bellEl.classList.toggle('bell-on',  willSubscribe);
-    bellEl.classList.toggle('bell-off', !willSubscribe);
-    bellEl.title = willSubscribe ? 'Unsubscribe from this game' : 'Subscribe to this game';
-    _pwaLog('log', `bell ${willSubscribe ? 'sub' : 'unsub'}: ${eventId}`);
+    bellEl.classList.toggle('bell-on',  subscribed);
+    bellEl.classList.toggle('bell-off', !subscribed);
+    bellEl.title = subscribed ? 'Notification options' : 'Get game alerts';
+    _pwaLog('log', `bell types: ${eventId} → [${types.join(',')}]`);
   } catch (err) {
-    _pwaLog('error', `bell toggle failed: ${err.message}`);
+    _pwaLog('error', `bell update failed: ${err.message}`);
     window.showBellError(bellEl, 'Failed — try again');
-  } finally {
-    bellEl.disabled = false;
   }
-};
+}
 
 // ── Document-level delegated bell click handler ───────────────────────────────
-// Handles ALL bells across list view, live tab, and event modal.
-// No inline onclick attributes needed on bell buttons.
 
 document.addEventListener('click', function(e) {
   const bell = e.target.closest('[data-bell-event-id]');
   if (!bell) return;
   e.stopPropagation();
+  // Toggle: click same bell again → close
+  if (_activeBellEl === bell && document.getElementById('bell-menu')) {
+    _closeBellMenu(); return;
+  }
   const eventId = bell.dataset.bellEventId;
-  const endpoint = window.getPushEndpoint();
-  _pwaLog('log', `bell click: eventId=${eventId} endpoint=${endpoint ? endpoint.slice(-12) : 'null'}`);
-  window.toggleGameSubscription(endpoint, eventId, bell);
-}, true); // capture phase — fires before any child/container handlers
+  const sport   = bell.dataset.bellSport || '';
+  _pwaLog('log', `bell click: ${eventId} endpoint=${window.getPushEndpoint()?.slice(-12) ?? 'null'}`);
+  _openBellMenu(bell, eventId, sport);
+}, true); // capture phase
+
+// Close on outside click
+document.addEventListener('click', function(e) {
+  if (!document.getElementById('bell-menu')) return;
+  if (!e.target.closest('#bell-menu')) _closeBellMenu();
+});
+
+// Close on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeBellMenu(); });
 
 // ── Enable notifications button ───────────────────────────────────────────────
 
@@ -403,10 +468,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       const bell = e.target.closest('[data-bell-event-id]');
       if (!bell) return;
       e.stopPropagation();
+      if (_activeBellEl === bell && document.getElementById('bell-menu')) {
+        _closeBellMenu(); return;
+      }
       const eventId = bell.dataset.bellEventId;
-      const endpoint = window.getPushEndpoint();
-      _pwaLog('log', `modal bell: eventId=${eventId} endpoint=${endpoint ? endpoint.slice(-12) : 'null'}`);
-      window.toggleGameSubscription(endpoint, eventId, bell);
+      const sport   = bell.dataset.bellSport || '';
+      _pwaLog('log', `modal bell: eventId=${eventId}`);
+      _openBellMenu(bell, eventId, sport);
     });
   }
 
