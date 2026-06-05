@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asu-cal-v1';
+const CACHE_NAME = 'asu-cal-v2';
 const OFFLINE_CHANNEL = 'asu-offline';
 
 const SHELL_URLS = [
