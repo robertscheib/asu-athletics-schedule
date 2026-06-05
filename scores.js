@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const { updateScore, upsertESPNEvent, queryEvents, updateGameStatus } = require('./db');
+const { updateScore, updateLiveScore, upsertESPNEvent, queryEvents, updateGameStatus } = require('./db');
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 
@@ -740,6 +740,7 @@ async function fetchLiveGames() {
 async function fetchAndStoreLiveScores() {
   let fetched = 0;
   let written = 0;
+  const scoreChanges = [];
 
   for (const cfg of ALL_LIVE_CONFIGS) {
     let scoreboard;
@@ -763,7 +764,48 @@ async function fetchAndStoreLiveScores() {
 
       fetched++;
 
-      if (comp.status?.type?.state !== 'post') continue;
+      const state = comp.status?.type?.state;
+
+      // ── Live game: detect score changes for score_update notifications ──
+      if (state === 'in') {
+        const oppComp = comp.competitors?.find(c =>
+          !c.team?.displayName?.toLowerCase().includes('arizona state')
+        );
+        if (!oppComp) continue;
+
+        const asuScore = asuComp.score?.displayValue ?? String(asuComp.score ?? '');
+        const oppScore = oppComp.score?.displayValue ?? String(oppComp.score ?? '');
+        if (!asuScore || !oppScore) continue;
+
+        const liveData = {
+          espnOppDisplay: (oppComp.team?.displayName || '').toLowerCase(),
+          espnOppAbbr:    (oppComp.team?.abbreviation || '').toLowerCase(),
+          espnEventId:    espnEvent.id,
+        };
+        const dbMatch = findDBMatch(liveData, dbEvents, new Date(espnEvent.date));
+        if (!dbMatch) continue;
+
+        if (dbMatch.asu_score !== asuScore || dbMatch.opp_score !== oppScore) {
+          updateLiveScore(dbMatch.id, asuScore, oppScore);
+          written++;
+          const statusDetail = comp.status?.type?.shortDetail || '';
+          scoreChanges.push({
+            eventId: dbMatch.id,
+            sport:   dbMatch.sport || cfg.dbSport,
+            title:   dbMatch.title,
+            asuScore,
+            oppScore,
+            statusDetail,
+          });
+        }
+        if (dbMatch.game_status !== 'in') {
+          updateGameStatus(dbMatch.id, 'in');
+        }
+        continue;
+      }
+
+      // ── Final score ──────────────────────────────────────────────────────
+      if (state !== 'post') continue;
 
       const scoreData = extractScore(espnEvent);
       if (!scoreData) continue;
@@ -785,7 +827,7 @@ async function fetchAndStoreLiveScores() {
     }
   }
 
-  return { fetched, written };
+  return { fetched, written, scoreChanges };
 }
 
 async function fetchAndStoreScores() {

@@ -305,7 +305,7 @@ function renderGameCard(game) {
   const isFuture = game.startTime && game.startTime > nowTs;
   const bellTooltip = game.state === 'live' ? 'Notify me when this game ends' : 'Subscribe to this game';
   const bellHtml = game.dbEventId
-    ? window.bellIconHTML(game.dbEventId, isFuture || game.state === 'live', bellTooltip)
+    ? window.bellIconHTML(game.dbEventId, isFuture || game.state === 'live', bellTooltip, game.sport)
     : '';
 
   return `

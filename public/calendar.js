@@ -216,7 +216,7 @@ function listEventHTML(e) {
   const nowTs = Math.floor(Date.now() / 1000);
   const isFuture = e.start_date && e.start_date > nowTs;
   const bellHtml = isFuture && typeof window.bellIconHTML === 'function'
-    ? window.bellIconHTML(e.id, true)
+    ? window.bellIconHTML(e.id, true, undefined, e.sport)
     : '';
 
   return `
