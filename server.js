@@ -4,7 +4,7 @@ const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fetch = require('node-fetch');
-const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription } = require('./db');
+const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, hasPushSubscription } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
 const { fetchLiveGames, TOURNAMENT_RE } = require('./scores');
@@ -744,6 +744,7 @@ app.post('/api/subscribe/game', generalLimit, (req, res) => {
   try {
     const { endpoint, eventId } = req.body ?? {};
     if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
+    if (!hasPushSubscription(endpoint)) return res.status(409).json({ error: 'push subscription not found — register device first' });
     addGameSubscription(endpoint, eventId);
     res.json({ success: true });
   } catch (err) {

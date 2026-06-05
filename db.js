@@ -422,13 +422,19 @@ function getActiveGameWindows() {
 }
 
 function getEndedGamesWithSubscribers() {
+  const cutoff = Math.floor(Date.now() / 1000) - 48 * 3600;
   return db.prepare(`
     SELECT e.id, e.title, e.sport, e.asu_score, e.opp_score, e.result, e.game_type
     FROM events e
     WHERE e.result IS NOT NULL
       AND e.final_push_sent = 0
+      AND e.start_date >= @cutoff
       AND EXISTS (SELECT 1 FROM game_subscriptions gs WHERE gs.event_id = e.id)
-  `).all();
+  `).all({ cutoff });
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows };
+function hasPushSubscription(endpoint) {
+  return !!db.prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint').get({ endpoint });
+}
+
+module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows, hasPushSubscription };
