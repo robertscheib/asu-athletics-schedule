@@ -264,10 +264,17 @@ async function loadFilterOptions() {
     seasonSelect.appendChild(opt);
   });
 
-  // Auto-select most recent season with completed games
+  // Auto-select most recent season with completed games; fall back to most recent season available
   const seasonsWithResults = [...new Set(allEvents.filter(e => e.result).map(e => e.season).filter(Boolean))];
+
+  let defaultSeason = null;
   if (seasonsWithResults.length) {
-    const defaultSeason = seasonsWithResults.sort().pop();
+    defaultSeason = seasonsWithResults.sort().pop();
+  } else if (seasons.length) {
+    // Off-season / new season: no results yet — pick the most recent season.
+    defaultSeason = seasons[0]; // seasons array is ORDER BY season DESC
+  }
+  if (defaultSeason) {
     seasonSelect.value = defaultSeason;
     applySeason(defaultSeason);
   }

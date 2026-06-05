@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "1.1.1",
+      "date": "2026-06-04",
+      "title": "Bug Fixes",
+      "features": [
+        "Schedule view now refreshes correctly when switching tabs",
+        "Season auto-selects the most recent season even when no results are recorded yet"
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-06-04",
       "title": "Push Notifications & PWA",
