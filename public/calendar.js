@@ -54,15 +54,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.__calendar = calendar;
 
   window.reloadEvents = () => {
-    const view = localStorage.getItem('asu-cal-view') || 'calendar';
-    if (view === 'calendar') {
-      calendar.refetchEvents();
-    } else if (view === 'map') {
-      window.renderMapView && window.renderMapView();
-    } else if (view === 'live') {
+    // Derive active view from DOM, not localStorage, to avoid stale reads.
+    const liveEl = document.getElementById('live-view');
+    const mapEl  = document.getElementById('map-view');
+    const listEl = document.getElementById('list-view');
+
+    if (liveEl && liveEl.style.display === 'block') {
       window.renderLiveView && window.renderLiveView();
-    } else {
+    } else if (mapEl && mapEl.style.display === 'block') {
+      window.renderMapView && window.renderMapView();
+    } else if (listEl && listEl.style.display === 'block') {
       renderListView();
+    } else {
+      calendar.refetchEvents();
     }
   };
 
