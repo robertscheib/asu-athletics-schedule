@@ -3,6 +3,7 @@ const { updateScore, updateLiveScore, upsertESPNEvent, queryEvents, updateGameSt
 const { opponentFromTitle } = require('./lib/opponent');
 const { USER_AGENT } = require('./lib/constants');
 const { SPORT_CONFIG, ALL_LIVE_CONFIGS, TOURNAMENT_RE } = require('./lib/sports-config');
+const { buildTournaments, detectActiveTournaments } = require('./lib/tournaments');
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 
@@ -205,309 +206,137 @@ function extractSportDetails(comp, sport) {
   return base;
 }
 
-function getNextGame() {
-  const nowTs = Math.floor(Date.now() / 1000);
-  const upcoming = queryEvents({ from: nowTs });
-  if (!upcoming.length) return null;
-  const next = upcoming[0];
+// ── Live game helpers ─────────────────────────────────────────────────────────
+
+// Include today's games (all states) and completed games within the past 24
+// hours. The 24h window keeps final scores visible after midnight without
+// letting off-season scoreboards (e.g. football) flood the feed with
+// upcoming games.
+function _isRelevantGame(espnEvent, comp) {
+  const state = comp.status?.type?.state;
+  if (!state || !['in', 'pre', 'post'].includes(state)) return false;
+
+  const todayPhoenix = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+  // TBD games use a midnight-ish UTC placeholder that shifts the date back in western timezones.
+  // Use the raw UTC date for those so "Jun 1 TBD" doesn't appear as May 31.
+  const isTBDGame = comp.status?.type?.shortDetail === 'TBD';
+  const gameDay = isTBDGame
+    ? espnEvent.date.slice(0, 10)
+    : new Date(espnEvent.date).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+  const isToday = gameDay === todayPhoenix;
+  const isRecentFinal = state === 'post' && (Date.now() - new Date(espnEvent.date).getTime()) < 24 * 60 * 60 * 1000;
+  return isToday || isRecentFinal;
+}
+
+// Auto-update a completed game's final score + status in the DB while we
+// have the scoreboard data in hand.
+function _syncCompletedGame(espnEvent, dbEvents) {
+  const scoreData = extractScore(espnEvent);
+  if (!scoreData) return;
+  const dbMatch = findDBMatch(scoreData, dbEvents, new Date(espnEvent.date));
+  if (!dbMatch) return;
+  if (dbMatch.result !== scoreData.result ||
+      dbMatch.asu_score !== scoreData.asu_score ||
+      dbMatch.opp_score !== scoreData.opp_score) {
+    updateScore(dbMatch.id, scoreData.asu_score, scoreData.opp_score, scoreData.result);
+    console.log(`[live] Auto-updated completed game: ${dbMatch.title}`);
+  }
+  if (dbMatch.game_status !== 'post') {
+    updateGameStatus(dbMatch.id, 'post');
+  }
+}
+
+// Assemble the live-game object served by /api/live from an ESPN scoreboard
+// event and its optional DB match.
+function _buildLiveGame(cfg, espnEvent, comp, asuComp, oppComp, dbMatch) {
+  const state = comp.status?.type?.state;
+  const gameState = state === 'in' ? 'live' : state === 'pre' ? 'upcoming' : 'final';
+  const asuScore = asuComp.score?.displayValue ?? String(asuComp.score ?? '0');
+  const oppScore = oppComp?.score?.displayValue ?? String(oppComp?.score ?? '0');
+  const oppName = oppComp?.team?.displayName || 'Opponent';
+
+  const title = dbMatch?.title || (asuComp.homeAway === 'away'
+    ? `Arizona State at ${oppName}`
+    : `Arizona State vs. ${oppName}`);
+
+  const notes = (espnEvent.notes || []).map(n => n.headline || '').join(' ');
+  const isTournament = TOURNAMENT_RE.test(title) ||
+    TOURNAMENT_RE.test(dbMatch?.badges || '') ||
+    TOURNAMENT_RE.test(notes);
+
+  const venue = comp.venue;
+  const broadcast = comp.broadcasts?.[0]?.names?.[0]
+    || comp.geoBroadcasts?.[0]?.media?.shortName
+    || dbMatch?.tv_network
+    || null;
+
   return {
-    id: next.id,
-    title: next.title,
-    sport: next.sport,
-    startTime: next.start_date,
-    location: [next.city, next.state].filter(Boolean).join(', ') || next.location_name || null,
-    tvNetwork: next.tv_network || null,
-    gameType: next.game_type || null,
-    opponent_logo: next.opponent_logo || null,
+    espnEventId: espnEvent.id,
+    dbEventId: dbMatch?.id ?? null,
+    sport: cfg.dbSport,
+    title,
+    state: gameState,
+    asuScore: gameState !== 'upcoming' ? asuScore : null,
+    oppScore: gameState !== 'upcoming' ? oppScore : null,
+    asuWinner: asuComp.winner === true,
+    oppName,
+    oppLogo: oppComp?.team?.logo || null,
+    oppAbbr: oppComp?.team?.abbreviation || '',
+    situation: comp.status?.type?.shortDetail || comp.status?.type?.description || '',
+    sportDetails: extractSportDetails(comp, cfg.dbSport),
+    location: venue?.fullName || dbMatch?.location_name || null,
+    city: venue?.address?.city || dbMatch?.city || null,
+    stateAbbr: venue?.address?.state || dbMatch?.state || null,
+    tvNetwork: broadcast,
+    startTime: Math.floor(new Date(espnEvent.date).getTime() / 1000),
+    isTournament,
+    espnNotes: notes,
+    source: 'ESPN',
   };
 }
 
-// ── Tournament bracket helpers ────────────────────────────────────────────────
-
-function extractRoundName(summaryData, game) {
-  const notes = summaryData?.header?.competitions?.[0]?.notes || [];
-  for (const note of notes) {
-    const text = note.headline || note.text || '';
-    if (text) return text;
-  }
-  return game.espnNotes || 'Tournament';
-}
-
-function buildBracketTeam(compData, fallbackGame, isASU) {
-  if (compData) {
-    return {
-      name: compData.team?.displayName || (isASU ? 'Arizona State' : 'TBD'),
-      abbr: compData.team?.abbreviation || (isASU ? 'ASU' : 'TBD'),
-      logo: compData.team?.logos?.[0]?.href || compData.team?.logo || null,
-      seed: compData.curatedRank?.current ?? null,
-      score: compData.score?.displayValue ?? (compData.score != null ? String(compData.score) : null),
-      winner: compData.winner === true ? true : compData.winner === false ? false : null,
-      isASU,
-    };
-  }
-  if (isASU) {
-    return {
-      name: 'Arizona State', abbr: 'ASU', logo: null, seed: null,
-      score: fallbackGame?.asuScore ?? null,
-      winner: fallbackGame?.state === 'final' ? (fallbackGame?.asuWinner === true) : null,
-      isASU: true,
-    };
-  }
-  return {
-    name: fallbackGame?.oppName || 'TBD',
-    abbr: fallbackGame?.oppAbbr || 'TBD',
-    logo: fallbackGame?.oppLogo || null,
-    seed: null,
-    score: fallbackGame?.oppScore ?? null,
-    winner: fallbackGame?.state === 'final' ? (fallbackGame?.asuWinner === false) : null,
-    isASU: false,
-  };
-}
-
-function inferRounds(games) {
-  const matchups = games.map(g => ({
-    id: g.espnEventId || `m-${Date.now()}-${Math.random()}`,
-    teamA: buildBracketTeam(null, g, true),
-    teamB: buildBracketTeam(null, g, false),
-    state: g.state === 'live' ? 'in' : g.state === 'upcoming' ? 'pre' : 'post',
-    startTime: g.startTime,
-    situation: g.situation || '',
-  }));
-  return [{ name: 'Tournament', matchups }];
-}
-
-function buildBracketRoundsFromSummaries(group, summaries) {
-  const summaryMap = {};
-  for (const s of summaries) summaryMap[s.gameId] = s.data;
-
-  const ROUND_ORDER = ['regional', 'super regional', 'college world series', 'semifinal', 'final', 'championship'];
-  const roundMap = {};
-
-  for (const g of group.games) {
-    const summary = summaryMap[g.espnEventId];
-    const roundName = extractRoundName(summary, g);
-    if (!roundMap[roundName]) roundMap[roundName] = { name: roundName, matchups: [] };
-
-    const comp = summary?.header?.competitions?.[0];
-    const competitors = comp?.competitors || [];
-    const asuComp = competitors.find(c => c.team?.displayName?.toLowerCase().includes('arizona state'));
-    const oppComp = competitors.find(c => !c.team?.displayName?.toLowerCase().includes('arizona state'));
-
-    const rawState = comp?.status?.type?.state;
-    const state = rawState === 'in' ? 'in' : rawState === 'pre' ? 'pre' : rawState === 'post' ? 'post'
-      : (g.state === 'live' ? 'in' : g.state === 'upcoming' ? 'pre' : 'post');
-
-    roundMap[roundName].matchups.push({
-      id: g.espnEventId || `m-${Date.now()}`,
-      teamA: buildBracketTeam(asuComp, g, true),
-      teamB: buildBracketTeam(oppComp, g, false),
-      state,
-      startTime: g.startTime,
-      situation: g.situation || '',
+// Insert an ESPN game that has no DB match so it appears in list/calendar
+// views — happens for postseason/tournament games that the sundevils.com
+// feed never emits. Only call when dbMatch was null: the game's location/
+// tvNetwork/oppLogo fields then hold the raw ESPN values the row needs.
+// Returns the new event id, or null if the insert failed.
+function _autoInsertEspnGame(cfg, espnEvent, comp, asuComp, game) {
+  const newEventId = `espn_${espnEvent.id}`;
+  const gameType = comp.neutralSite === true ? 'neutral'
+    : asuComp.homeAway === 'home' ? 'home' : 'away';
+  try {
+    upsertESPNEvent({
+      id: newEventId,
+      title: game.title,
+      sport: cfg.dbSport,
+      season: String(new Date(espnEvent.date).getFullYear()),
+      start_date: Math.floor(new Date(espnEvent.date).getTime() / 1000),
+      end_date: null,
+      location_name: game.location,
+      venue_address: null,
+      city: game.city,
+      state: game.stateAbbr,
+      country: null,
+      game_type: gameType,
+      event_type: 'Game',
+      tv_network: game.tvNetwork,
+      ticket_url: null,
+      ticket_label: null,
+      opponent_logo: game.oppLogo,
+      badges: null,
+      image_url: null,
+      node_url: null,
+      updated_at: Date.now(),
+      asu_score: null,
+      opp_score: null,
+      result: null,
     });
+    console.log(`[live] Auto-inserted ESPN game: ${game.title}`);
+    return newEventId;
+  } catch (err) {
+    console.error(`[live] Auto-insert failed for ${espnEvent.id}:`, err.message);
+    return null;
   }
-
-  return Object.values(roundMap).sort((a, b) => {
-    const ai = ROUND_ORDER.findIndex(r => a.name.toLowerCase().includes(r));
-    const bi = ROUND_ORDER.findIndex(r => b.name.toLowerCase().includes(r));
-    if (ai === -1 && bi === -1) return 0;
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-}
-
-function buildSeriesTournament(group, summaries) {
-  const summaryMap = {};
-  for (const s of summaries) summaryMap[s.gameId] = s.data;
-
-  const seriesGames = group.games.map(g => {
-    const series = summaryMap[g.espnEventId]?.header?.competitions?.[0]?.series;
-    return { ...g, gameNumber: series?.gameNumber ?? null, maxGames: series?.maxGames ?? null };
-  }).sort((a, b) => (a.gameNumber ?? 999) - (b.gameNumber ?? 999) || a.startTime - b.startTime);
-
-  return { ...group, format: 'series', rounds: [], standings: [], seriesGames, bracketReady: true };
-}
-
-async function fetchPoolStandings(espnPath) {
-  const url = `${ESPN_BASE}/${espnPath}/scoreboard?groups=50`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT },
-    timeout: 10000,
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const entries = data.standings?.entries || data.standings?.groups?.[0]?.entries || [];
-  if (!entries.length) return null;
-
-  return entries.map((entry, i) => {
-    const stats = entry.stats || [];
-    const getStat = name => stats.find(s => s.name === name)?.displayValue ?? '-';
-    return {
-      rank: entry.team?.rank ?? i + 1,
-      name: entry.team?.displayName || 'Unknown',
-      abbr: entry.team?.abbreviation || '',
-      logo: entry.team?.logos?.[0]?.href || null,
-      w: getStat('wins'),
-      l: getStat('losses'),
-      pct: getStat('winPercent'),
-      gb: getStat('gamesBehind'),
-      isASU: (entry.team?.displayName || '').toLowerCase().includes('arizona state'),
-    };
-  });
-}
-
-async function buildTournaments(games) {
-  const tournamentGames = games.filter(g => g.isTournament);
-  if (!tournamentGames.length) return [];
-
-  const groups = {};
-  for (const g of tournamentGames) {
-    const key = g.espnNotes ? `${g.sport}:${g.espnNotes}` : `${g.sport}:tournament`;
-    if (!groups[key]) {
-      groups[key] = { id: key, sport: g.sport, name: g.espnNotes || `${g.sport} Tournament`, games: [] };
-    }
-    groups[key].games.push(g);
-  }
-
-  const results = [];
-
-  for (const group of Object.values(groups)) {
-    group.games.sort((a, b) => a.startTime - b.startTime);
-
-    const cfg = ALL_LIVE_CONFIGS.find(c => c.dbSport === group.sport);
-    if (!cfg) {
-      console.warn(`[live] No ESPN config for sport ${group.sport}, using inferred bracket`);
-      results.push({ ...group, format: 'bracket', rounds: inferRounds(group.games), standings: [], seriesGames: [], bracketReady: true });
-      continue;
-    }
-
-    // Fetch ESPN summaries for each tournament game to get round/series context
-    const summaries = [];
-    for (const g of group.games) {
-      if (!g.espnEventId) continue;
-      try {
-        const url = `${ESPN_BASE}/${cfg.espnPath}/summary?event=${g.espnEventId}`;
-        const res = await fetch(url, {
-          headers: { 'User-Agent': USER_AGENT },
-          timeout: 10000,
-        });
-        if (res.ok) summaries.push({ gameId: g.espnEventId, data: await res.json() });
-      } catch (err) {
-        console.error(`[live] Summary fetch failed for event ${g.espnEventId}:`, err.message);
-      }
-    }
-
-    // Series format: ESPN reports maxGames > 1 on the competition
-    const hasSeries = summaries.some(s => {
-      const series = s.data?.header?.competitions?.[0]?.series;
-      return series?.maxGames > 1;
-    });
-    if (hasSeries) {
-      results.push(buildSeriesTournament(group, summaries));
-      continue;
-    }
-
-    // Pool format: try groups endpoint for standings
-    let standings = null;
-    try {
-      standings = await fetchPoolStandings(cfg.espnPath);
-    } catch (err) {
-      console.error(`[live] Pool standings fetch failed for ${group.sport}:`, err.message);
-    }
-    if (standings && standings.length > 0) {
-      results.push({ ...group, format: 'pool', rounds: [], standings, seriesGames: [], bracketReady: true });
-      continue;
-    }
-
-    // Bracket format: build rounds from summaries (or infer from game list if all fetches failed)
-    const rounds = summaries.length
-      ? buildBracketRoundsFromSummaries(group, summaries)
-      : inferRounds(group.games);
-
-    results.push({ ...group, format: 'bracket', rounds, standings: [], seriesGames: [], bracketReady: true });
-  }
-
-  return results;
-}
-
-async function detectActiveTournaments() {
-  const nowTs = Math.floor(Date.now() / 1000);
-  const candidates = queryEvents({ from: nowTs - 86400, to: nowTs + 14 * 86400 })
-    .filter(e =>
-      TOURNAMENT_RE.test(e.title || '') ||
-      TOURNAMENT_RE.test(e.badges || '') ||
-      TOURNAMENT_RE.test(e.location_name || '')
-    );
-
-  if (!candidates.length) return [];
-
-  function deriveTournamentName(sport, event) {
-    const text = `${event.title || ''} ${event.badges || ''} ${event.location_name || ''}`;
-    const m = text.match(/ncaa\s+(?:super\s+regional|regional|tournament|championship)|super\s+regional|college\s+world\s+series|regional|championship|tournament/i);
-    return m ? m[0].replace(/\s+/g, ' ').trim() : `${sport} Tournament`;
-  }
-
-  const groups = {};
-  for (const event of candidates) {
-    const name = deriveTournamentName(event.sport, event);
-    const key = `${event.sport}:${name}`;
-    if (!groups[key]) {
-      groups[key] = { id: `db:${key}`, sport: event.sport, name, events: [] };
-    }
-    groups[key].events.push(event);
-  }
-
-  const results = [];
-
-  for (const group of Object.values(groups)) {
-    group.events.sort((a, b) => a.start_date - b.start_date);
-
-    const games = group.events.map(event => ({
-      espnEventId: null,
-      dbEventId: event.id,
-      sport: event.sport,
-      title: event.title,
-      state: event.start_date < nowTs ? 'final' : 'upcoming',
-      asuScore: event.asu_score || null,
-      oppScore: event.opp_score || null,
-      asuWinner: event.result === 'W',
-      oppName: opponentFromTitle(event.title, { fallback: 'Opponent' }),
-      oppLogo: event.opponent_logo || null,
-      oppAbbr: '',
-      situation: event.result ? `Final: ${event.asu_score}–${event.opp_score}` : '',
-      sportDetails: {},
-      location: event.location_name || null,
-      city: event.city || null,
-      stateAbbr: event.state || null,
-      tvNetwork: event.tv_network || null,
-      startTime: event.start_date,
-      isTournament: true,
-      espnNotes: '',
-      source: 'DB',
-    }));
-
-    const cfg = ALL_LIVE_CONFIGS.find(c => c.dbSport === group.sport);
-    if (!cfg) {
-      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games, bracketReady: false });
-      continue;
-    }
-
-    let standings = null;
-    try {
-      standings = await fetchPoolStandings(cfg.espnPath);
-    } catch (err) {
-      console.error(`[live] DB-detected pool fetch failed for ${group.sport}:`, err.message);
-    }
-    if (standings && standings.length > 0) {
-      results.push({ id: group.id, sport: group.sport, name: group.name, format: 'pool', rounds: [], standings, seriesGames: [], games, bracketReady: false });
-      continue;
-    }
-
-    results.push({ id: group.id, sport: group.sport, name: group.name, format: 'bracket', rounds: inferRounds(games), standings: [], seriesGames: [], games, bracketReady: false });
-  }
-
-  return results;
 }
 
 async function fetchLiveGames() {
@@ -538,138 +367,24 @@ async function fetchLiveGames() {
         !c.team?.displayName?.toLowerCase().includes('arizona state')
       );
 
-      const state = comp.status?.type?.state;
-      if (!state || !['in', 'pre', 'post'].includes(state)) continue;
+      if (!_isRelevantGame(espnEvent, comp)) continue;
 
-      // Include today's games (all states) and completed games within the past 24 hours.
-      // The 24h window keeps final scores visible after midnight without letting
-      // off-season scoreboards (e.g. football) flood the feed with upcoming games.
-      const todayPhoenix = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
-      // TBD games use a midnight-ish UTC placeholder that shifts the date back in western timezones.
-      // Use the raw UTC date for those so "Jun 1 TBD" doesn't appear as May 31.
-      const isTBDGame = comp.status?.type?.shortDetail === 'TBD';
-      const gameDay = isTBDGame
-        ? espnEvent.date.slice(0, 10)
-        : new Date(espnEvent.date).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
-      const isToday = gameDay === todayPhoenix;
-      const isRecentFinal = state === 'post' && (Date.now() - new Date(espnEvent.date).getTime()) < 24 * 60 * 60 * 1000;
-      if (!isToday && !isRecentFinal) continue;
-
-      // Auto-update completed games in DB while we have the data
-      if (state === 'post') {
-        const scoreData = extractScore(espnEvent);
-        if (scoreData) {
-          const dbMatch = findDBMatch(scoreData, dbEvents, new Date(espnEvent.date));
-          if (dbMatch) {
-            if (dbMatch.result !== scoreData.result ||
-                dbMatch.asu_score !== scoreData.asu_score ||
-                dbMatch.opp_score !== scoreData.opp_score) {
-              updateScore(dbMatch.id, scoreData.asu_score, scoreData.opp_score, scoreData.result);
-              console.log(`[live] Auto-updated completed game: ${dbMatch.title}`);
-            }
-            if (dbMatch.game_status !== 'post') {
-              updateGameStatus(dbMatch.id, 'post');
-            }
-          }
-        }
+      if (comp.status?.type?.state === 'post') {
+        _syncCompletedGame(espnEvent, dbEvents);
       }
 
-      const gameState = state === 'in' ? 'live' : state === 'pre' ? 'upcoming' : 'final';
-      const asuScore = asuComp.score?.displayValue ?? String(asuComp.score ?? '0');
-      const oppScore = oppComp?.score?.displayValue ?? String(oppComp?.score ?? '0');
-      const oppName = oppComp?.team?.displayName || 'Opponent';
-      const oppLogo = oppComp?.team?.logo || null;
-      const oppAbbr = oppComp?.team?.abbreviation || '';
-
       const matchKey = {
-        espnOppDisplay: oppName.toLowerCase(),
-        espnOppAbbr: oppAbbr.toLowerCase(),
+        espnOppDisplay: (oppComp?.team?.displayName || 'Opponent').toLowerCase(),
+        espnOppAbbr: (oppComp?.team?.abbreviation || '').toLowerCase(),
         espnEventId: espnEvent.id,
       };
       const dbMatch = findDBMatch(matchKey, dbEvents, new Date(espnEvent.date));
 
-      const title = dbMatch?.title || (asuComp.homeAway === 'away'
-        ? `Arizona State at ${oppName}`
-        : `Arizona State vs. ${oppName}`);
-
-      const sportDetails = extractSportDetails(comp, cfg.dbSport);
-      const situation = comp.status?.type?.shortDetail || comp.status?.type?.description || '';
-      const notes = (espnEvent.notes || []).map(n => n.headline || '').join(' ');
-
-      const isTournament = TOURNAMENT_RE.test(title) ||
-        TOURNAMENT_RE.test(dbMatch?.badges || '') ||
-        TOURNAMENT_RE.test(notes);
-
-      const venue = comp.venue;
-      const broadcast = comp.broadcasts?.[0]?.names?.[0]
-        || comp.geoBroadcasts?.[0]?.media?.shortName
-        || dbMatch?.tv_network
-        || null;
-
-      // Auto-insert ESPN games not yet in the DB so they appear in list/calendar views.
-      // Happens for postseason/tournament games that the sundevils.com feed never emits.
-      let dbEventId = dbMatch?.id ?? null;
+      const game = _buildLiveGame(cfg, espnEvent, comp, asuComp, oppComp, dbMatch);
       if (!dbMatch) {
-        const newEventId = `espn_${espnEvent.id}`;
-        const gameType = comp.neutralSite === true ? 'neutral'
-          : asuComp.homeAway === 'home' ? 'home' : 'away';
-        try {
-          upsertESPNEvent({
-            id: newEventId,
-            title,
-            sport: cfg.dbSport,
-            season: String(new Date(espnEvent.date).getFullYear()),
-            start_date: Math.floor(new Date(espnEvent.date).getTime() / 1000),
-            end_date: null,
-            location_name: venue?.fullName || null,
-            venue_address: null,
-            city: venue?.address?.city || null,
-            state: venue?.address?.state || null,
-            country: null,
-            game_type: gameType,
-            event_type: 'Game',
-            tv_network: broadcast,
-            ticket_url: null,
-            ticket_label: null,
-            opponent_logo: oppLogo,
-            badges: null,
-            image_url: null,
-            node_url: null,
-            updated_at: Date.now(),
-            asu_score: null,
-            opp_score: null,
-            result: null,
-          });
-          dbEventId = newEventId;
-          console.log(`[live] Auto-inserted ESPN game: ${title}`);
-        } catch (err) {
-          console.error(`[live] Auto-insert failed for ${espnEvent.id}:`, err.message);
-        }
+        game.dbEventId = _autoInsertEspnGame(cfg, espnEvent, comp, asuComp, game);
       }
-
-      games.push({
-        espnEventId: espnEvent.id,
-        dbEventId,
-        sport: cfg.dbSport,
-        title,
-        state: gameState,
-        asuScore: gameState !== 'upcoming' ? asuScore : null,
-        oppScore: gameState !== 'upcoming' ? oppScore : null,
-        asuWinner: asuComp.winner === true,
-        oppName,
-        oppLogo,
-        oppAbbr,
-        situation,
-        sportDetails,
-        location: venue?.fullName || dbMatch?.location_name || null,
-        city: venue?.address?.city || dbMatch?.city || null,
-        stateAbbr: venue?.address?.state || dbMatch?.state || null,
-        tvNetwork: broadcast,
-        startTime: Math.floor(new Date(espnEvent.date).getTime() / 1000),
-        isTournament,
-        espnNotes: notes,
-        source: 'ESPN',
-      });
+      games.push(game);
     }
   }
 
@@ -836,4 +551,4 @@ async function fetchAndStoreScores() {
   return { updated, inserted };
 }
 
-module.exports = { fetchAndStoreScores, fetchAndStoreLiveScores, fetchLiveGames, TOURNAMENT_RE };
+module.exports = { fetchAndStoreScores, fetchAndStoreLiveScores, fetchLiveGames };
