@@ -84,7 +84,7 @@ async function requestNotifyPermission() {
 }
 
 // Track which ESPN event IDs we've already notified about (persists across polls)
-const _notifiedIds = new Set(JSON.parse(localStorage.getItem('asu-notified-ids') || '[]'));
+const _notifiedIds = new Set(store.getJSON('asu-notified-ids', []));
 
 function _checkAndNotify(games) {
   if (Notification.permission !== 'granted') return;
@@ -92,7 +92,7 @@ function _checkAndNotify(games) {
   for (const game of liveGames) {
     if (!game.espnEventId || _notifiedIds.has(game.espnEventId)) continue;
     _notifiedIds.add(game.espnEventId);
-    try { localStorage.setItem('asu-notified-ids', JSON.stringify([..._notifiedIds])); } catch {}
+    store.setJSON('asu-notified-ids', [..._notifiedIds]);
     const title = 'ASU Game Live Now';
     const body  = `${game.sport}: ${shortOppName(game.oppName)} — ${game.asuScore ?? 0}–${game.oppScore ?? 0}`;
     new Notification(title, {
@@ -1036,25 +1036,7 @@ window.renderLiveView = function() {
 };
 
 // ── Utility helpers ───────────────────────────────────────────────────────────
-
-function esc(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function shortOppName(name) {
-  if (!name) return '';
-  return name.replace(/^(University of |The )/i, '');
-}
-
-function shortTitle(title) {
-  if (!title) return 'Event';
-  return title
-    .replace(/^Sun Devil [^:]+:\s*/i, '')
-    .replace(/^Arizona State\s+/i, '');
-}
+// esc / shortOppName / shortTitle moved to shared.js (loaded before this file).
 
 function formatGameTime(ts) {
   if (!ts) return '';

@@ -6,7 +6,7 @@ let _debugLines = [];
 let _debugPanelEl = null;
 
 function _pwaLog(level, msg) {
-  if (localStorage.getItem('pwaDebug') !== 'true') return;
+  if (store.get('pwaDebug') !== 'true') return;
   const t = new Date().toLocaleTimeString('en-US', { hour12: false });
   const line = `${t} [${level}] ${msg}`;
   _debugLines.push(line);
@@ -16,7 +16,7 @@ function _pwaLog(level, msg) {
 }
 
 function _initDebugPanel() {
-  if (localStorage.getItem('pwaDebug') !== 'true') return;
+  if (store.get('pwaDebug') !== 'true') return;
 
   const panel = document.createElement('div');
   panel.id = 'pwa-debug-panel';
@@ -40,7 +40,7 @@ function _initDebugPanel() {
   });
 
   // Log initial diagnostic state
-  _pwaLog('log', `endpoint: ${localStorage.getItem('asu-push-endpoint') || 'null'}`);
+  _pwaLog('log', `endpoint: ${store.get('asu-push-endpoint') || 'null'}`);
   _pwaLog('log', `standalone: ${window.navigator.standalone ?? 'n/a'}`);
   _pwaLog('log', `SW: ${navigator.serviceWorker?.controller ? 'active' : 'none'}`);
   _pwaLog('log', `permission: ${Notification?.permission ?? 'n/a'}`);
@@ -51,7 +51,7 @@ function _initDebugPanel() {
 const PUSH_ENDPOINT_KEY = 'asu-push-endpoint';
 let _swRegistration = null;
 
-window.getPushEndpoint = () => localStorage.getItem(PUSH_ENDPOINT_KEY) || null;
+window.getPushEndpoint = () => store.get(PUSH_ENDPOINT_KEY) || null;
 
 async function _initPushSubscription() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -70,7 +70,7 @@ async function _initPushSubscription() {
     }
     const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh'))));
     const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth'))));
-    if (localStorage.getItem(PUSH_ENDPOINT_KEY) === sub.endpoint) return;
+    if (store.get(PUSH_ENDPOINT_KEY) === sub.endpoint) return;
 
     const sportPrefs = _getSportPrefs();
     await fetch('/api/subscribe', {
@@ -78,7 +78,7 @@ async function _initPushSubscription() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: sub.endpoint, p256dh, auth, sportPrefs }),
     });
-    localStorage.setItem(PUSH_ENDPOINT_KEY, sub.endpoint);
+    store.set(PUSH_ENDPOINT_KEY, sub.endpoint);
 
     _pwaLog('log', '[pwa] Push subscription active');
     console.log('[pwa] Push subscription active');
@@ -99,14 +99,11 @@ function _urlBase64ToUint8Array(base64String) {
 // ── Sport preferences ─────────────────────────────────────────────────────────
 
 function _getSportPrefs() {
-  try {
-    const stored = localStorage.getItem('asu-sport-prefs');
-    return stored ? JSON.parse(stored) : null;
-  } catch { return null; }
+  return store.getJSON('asu-sport-prefs', null);
 }
 
 function _saveSportPrefs(prefs) {
-  try { localStorage.setItem('asu-sport-prefs', JSON.stringify(prefs)); } catch {}
+  store.setJSON('asu-sport-prefs', prefs);
 }
 
 // ── Bell icon state ───────────────────────────────────────────────────────────
@@ -115,7 +112,7 @@ function _saveSportPrefs(prefs) {
 // Migrates from old Set format (array of strings) to new Map format automatically.
 const _gameSubscriptions = (() => {
   try {
-    const stored = JSON.parse(localStorage.getItem('asu-game-subs') || '[]');
+    const stored = store.getJSON('asu-game-subs', []);
     if (!stored.length) return new Map();
     if (typeof stored[0] === 'string') {
       // Old Set format: ['id1', 'id2'] → Map with legacy defaults
@@ -126,7 +123,7 @@ const _gameSubscriptions = (() => {
 })();
 
 function _persistGameSubs() {
-  try { localStorage.setItem('asu-game-subs', JSON.stringify([..._gameSubscriptions])); } catch {}
+  store.setJSON('asu-game-subs', [..._gameSubscriptions]);
 }
 
 window.isGameSubscribed = function(eventId) {
@@ -297,7 +294,7 @@ function _isStandalone() {
 function _showIosBanner() {
   if (_isStandalone()) return;
   if (!_isIosSafari()) return;
-  if (localStorage.getItem('installBannerDismissed')) return;
+  if (store.get('installBannerDismissed')) return;
 
   const banner = document.createElement('div');
   banner.id = 'ios-install-banner';
@@ -311,7 +308,7 @@ function _showIosBanner() {
 }
 
 window._dismissIosBanner = function() {
-  localStorage.setItem('installBannerDismissed', '1');
+  store.set('installBannerDismissed', '1');
   const banner = document.getElementById('ios-install-banner');
   if (banner) {
     banner.classList.remove('ios-banner-visible');
