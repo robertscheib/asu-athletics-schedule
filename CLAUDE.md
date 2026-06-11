@@ -78,7 +78,9 @@ change a frontend file, bump its `?v=` AND bump `CACHE_NAME` in sw.js if index.h
   via vm harness); duplicate spin keyframes removed. Bumps: shared v1, filters v17, game-modal
   v1, live v25, map v3, pwa v5, style v5, SW cache asu-cal-v6. Verified per phase on
   PORT=3100 DISABLE_SCHEDULER=1 against /tmp/asu-refactor-baseline (events/ics byte-identical).
-  OPEN FOLLOW-UP (ops, deliberate non-change): VAPID keys live only in
-  ~/projects/unifi-scripts/secrets.env; copying the 3 VAPID lines into ~/projects/secrets.env
-  would make lib/env.js a pure safety net. Browser smoke test on a real device (esp. iOS PWA)
-  still recommended: all tabs, both modals, bell menu persistence, SW update to asu-cal-v6.
+  Browser smoke test on a real device (esp. iOS PWA) still recommended: all tabs, both
+  modals, bell menu persistence, SW update to asu-cal-v6.
+- [2026-06-11 (Claude Code)]: VAPID keys copied into ~/projects/secrets.env (systemd now
+  provides them directly; verified served public key matches). lib/env.js fallback to
+  ~/projects/unifi-scripts/secrets.env is now a pure safety net. Backup at
+  ~/projects/secrets.env.bak-2026-06-11.
