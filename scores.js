@@ -2,29 +2,9 @@ const fetch = require('node-fetch');
 const { updateScore, updateLiveScore, upsertESPNEvent, queryEvents, updateGameStatus } = require('./db');
 const { opponentFromTitle } = require('./lib/opponent');
 const { USER_AGENT } = require('./lib/constants');
+const { SPORT_CONFIG, ALL_LIVE_CONFIGS, TOURNAMENT_RE } = require('./lib/sports-config');
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
-
-// Sports for schedule sync (teamId required for team-schedule endpoint)
-const SPORT_CONFIG = [
-  { dbSport: 'Baseball',   espnPath: 'baseball/college-baseball',            teamId: '59',  fallSport: false },
-  { dbSport: 'Softball',   espnPath: 'baseball/college-softball',            teamId: '471', fallSport: false },
-  { dbSport: 'Football',   espnPath: 'football/college-football',            teamId: '9',   fallSport: true  },
-  { dbSport: 'Ice Hockey', espnPath: 'hockey/mens-college-hockey',           teamId: '9',   fallSport: false },
-  { dbSport: 'Volleyball', espnPath: 'volleyball/womens-college-volleyball', teamId: '9',   fallSport: true  },
-];
-
-// Additional sports polled for live data only (scoreboard doesn't need teamId)
-const LIVE_EXTRA_SPORTS = [
-  { dbSport: "Men's Basketball",   espnPath: 'basketball/mens-college-basketball',  fallSport: false },
-  { dbSport: "Women's Basketball", espnPath: 'basketball/womens-college-basketball', fallSport: false },
-  { dbSport: "Women's Soccer",     espnPath: 'soccer/womens-college-soccer',         fallSport: true  },
-  { dbSport: "Men's Soccer",       espnPath: 'soccer/mens-college-soccer',           fallSport: true  },
-];
-
-const ALL_LIVE_CONFIGS = [...SPORT_CONFIG, ...LIVE_EXTRA_SPORTS];
-
-const TOURNAMENT_RE = /regional|super\s*regional|tournament|playoff|championship|ncaa|bracket|semifinal|final\s*four|postseason/i;
 
 function getSeason(fallSport) {
   const now = new Date();
