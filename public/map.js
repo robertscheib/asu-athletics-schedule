@@ -138,14 +138,6 @@ function buildPopupHTML(events) {
   return html;
 }
 
-function esc(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// esc moved to shared.js (loaded before this file).
 
 window.renderMapView = renderMapView;

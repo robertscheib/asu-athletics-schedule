@@ -22,133 +22,8 @@ const REGIONS = {
 
 let allLocations = [];
 
-// Sport color palette — cycles through these
-const SPORT_COLORS = [
-  '#8C1D40', '#C0392B', '#27AE60', '#2980B9', '#8E44AD',
-  '#D35400', '#16A085', '#2C3E50', '#E74C3C', '#1ABC9C',
-  '#F39C12', '#6C3483', '#1F618D', '#117A65', '#7D6608',
-];
-const sportColorMap = {};
-let colorIdx = 0;
-
-function sportColor(sport) {
-  if (!sport) return '#8C1D40';
-  if (!sportColorMap[sport]) {
-    sportColorMap[sport] = SPORT_COLORS[colorIdx % SPORT_COLORS.length];
-    colorIdx++;
-  }
-  return sportColorMap[sport];
-}
-
-// ── Logo / opponent identity helpers ─────────────────────────────────────────
-
-function isUA(title, opponentLogo) {
-  // Extract the opponent from "[prefix] at/vs. [Opponent]" — take everything
-  // after the last occurrence of "at " or "vs. " in the title.
-  const vsMatch = (title || '').match(/\b(?:at|vs\.?)\s+(.+)$/i);
-  const opponent = (vsMatch ? vsMatch[1] : title || '').trim();
-
-  // Opponent is specifically UA when it starts with bare "Arizona",
-  // "Arizona Wildcats", or "University of Arizona".
-  // This correctly rejects "Northern Arizona", "Arizona Christian", etc.
-  if (/^arizona\s*$/i.test(opponent)) return true;
-  if (/^arizona\s+wildcats?/i.test(opponent)) return true;
-  if (/^university\s+of\s+arizona/i.test(opponent)) return true;
-
-  // ESPN logo URL contains "arizona-wildcat"
-  if (opponentLogo && /arizona-wildcat/i.test(opponentLogo)) return true;
-
-  return false;
-}
-
-// ESPN CDN logo lookup: opponent name → ESPN team ID
-// URL pattern: https://a.espncdn.com/i/teamlogos/ncaa/500/{id}.png
-const ESPN_LOGO_MAP = {
-  // Big 12
-  'arizona wildcats': 12, 'utah utes': 254, 'byu cougars': 252, 'byu': 252,
-  'oklahoma sooners': 201, 'oklahoma state cowboys': 197, 'oklahoma state cowgirls': 197,
-  'oklahoma st.': 197, 'kansas state wildcats': 2306, 'kansas st.': 2306,
-  'kansas jayhawks': 2305, 'kansas': 2305, 'west virginia mountaineers': 277,
-  'texas tech red raiders': 2641, 'tcu horned frogs': 2628,
-  'baylor bears': 239, 'baylor': 239, 'houston cougars': 248, 'houston': 248,
-  'ucf knights': 2116, 'ucf': 2116, 'cincinnati bearcats': 2132, 'cincinnati': 2132,
-  'iowa state cyclones': 66, 'colorado buffaloes': 38, 'colorado': 38,
-  // Other major conferences
-  'stanford cardinal': 24, 'stanford': 24, 'utah': 254, 'cal': 25,
-  'california golden bears': 25, 'north carolina tar heels': 153, 'nc state wolfpack': 152,
-  'tennessee volunteers': 2633, 'tennessee': 2633, 'texas a&m aggies': 245, 'texas a&m': 245,
-  'mississippi state bulldogs': 344, 'ole miss rebels': 145, 'ole miss': 145,
-  'michigan wolverines': 130, 'michigan': 130, 'wisconsin badgers': 275,
-  'indiana hoosiers': 84, 'northwestern wildcats': 77, 'northwestern': 77,
-  // Mountain West / WAC
-  'unlv rebels': 2439, 'unlv': 2439, 'san diego state aztecs': 21,
-  'nevada wolf pack': 2440, 'nevada': 2440, 'air force falcons': 2005, 'air force': 2005,
-  'new mexico state aggies': 166, 'new mexico st.': 166, 'utep miners': 2638,
-  // Big Sky / Summit / other D1
-  'grand canyon lopes': 2253, 'grand canyon': 2253, 'omaha mavericks': 2437, 'omaha': 2437,
-  'south dakota state jackrabbits': 2571, 'south dakota state': 2571, 'south dakota st.': 2571,
-  'north dakota fighting hawks': 2446, 'north dakota': 2446,
-  'st. cloud state huskies': 720, 'denver pioneers': 2172, 'denver': 2172,
-  'colorado college tigers': 2098, 'colorado college': 2098,
-  'uconn huskies': 41, 'uconn': 41, "st. john's red storm": 2599, "st. john's": 2599,
-  'loyola marymount lions': 2350, 'loyola marymount': 2350, 'lmu': 2350,
-  'memphis tigers': 235, 'memphis': 235, 'miami (oh) redhawks': 193, 'miami oh': 193,
-  'western michigan broncos': 2711, 'western michigan': 2711,
-  'toledo rockets': 2649, 'toledo': 2649, 'buffalo bulls': 2084, 'buffalo': 2084,
-  'texas state bobcats': 326, 'texas state': 326,
-  'cal baptist': 2856, 'california baptist lancers': 2856,
-  'uc riverside highlanders': 2427, 'uc riverside': 2427,
-  'eastern illinois panthers': 2178, 'eastern illinois': 2178,
-  'southern utah thunderbirds': 2561, 'southern utah': 2561,
-  'portland state vikings': 304, 'portland state': 304,
-  'grambling state': 2755, 'grambling': 2755,
-  'pacific tigers': 279, 'pacific': 279,
-  'colgate raiders': 2111, 'colgate': 2111,
-  'dartmouth big green': 2155, 'dartmouth': 2155,
-  'princeton tigers': 163, 'princeton': 163,
-  'marist red foxes': 2373, 'marist': 2373,
-  'nebraska cornhuskers': 158, 'nebraska': 158,
-  'texas longhorns': 251, 'texas': 251,
-  'lsu tigers': 99, 'lsu': 99,
-  'minnesota golden gophers': 135, 'minnesota': 135,
-  'oklahoma state': 197,
-};
-
-function espnLogoUrl(title) {
-  const vsMatch = (title || '').match(/\b(?:at|vs\.?)\s+(.+)$/i);
-  if (!vsMatch) return null;
-  const raw = vsMatch[1].replace(/^sun devil [^:]+:\s*/i, '').trim();
-  const norm = raw.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (ESPN_LOGO_MAP[norm] != null) {
-    return `https://a.espncdn.com/i/teamlogos/ncaa/500/${ESPN_LOGO_MAP[norm]}.png`;
-  }
-  const words = norm.split(' ');
-  for (let i = words.length - 1; i >= 1; i--) {
-    const shorter = words.slice(0, i).join(' ');
-    if (ESPN_LOGO_MAP[shorter] != null) {
-      return `https://a.espncdn.com/i/teamlogos/ncaa/500/${ESPN_LOGO_MAP[shorter]}.png`;
-    }
-  }
-  return null;
-}
-
-function opponentInitial(title) {
-  if (!title) return '?';
-  const cleaned = title
-    .replace(/^sun devil [^:]+:\s*/i, '')
-    .replace(/^arizona state\s+/i, '')
-    .replace(/^(vs\.?|at)\s+/i, '');
-  return cleaned.charAt(0).toUpperCase() || '?';
-}
-
-window.makeLogoPlaceholder = function(title, color) {
-  const el = document.createElement('div');
-  el.className = 'list-event-logo-placeholder';
-  el.style.borderColor = color + '20';
-  el.style.color = color;
-  el.textContent = opponentInitial(title);
-  return el;
-};
+// sportColor / isUA / espnLogoUrl / opponentInitial / makeLogoPlaceholder
+// now live in shared.js (loaded before this file).
 
 function eventLogoHTML(event) {
   const color = sportColor(event.sport);
@@ -184,14 +59,6 @@ function resolveModalLogo(event) {
   if (isUA(event.title, event.opponent_logo)) return { type: 'emoji', value: '💩' };
   if (event.opponent_logo) return { type: 'img', value: event.opponent_logo };
   return { type: 'img', value: '/sparky.png' };
-}
-
-function seasonLabel(val) {
-  if (val === '2025')    return '2024–25';
-  if (val === '2026')    return '2025–26';
-  if (val === '2025_26') return '2024–25 (Full)';
-  if (val === '2026_27') return '2025–26 (Full)';
-  return val;
 }
 
 // ── Toast notifications ────────────────────────────────
@@ -280,7 +147,7 @@ async function loadFilterOptions() {
   }
 
   // Restore date range open/closed state
-  if (localStorage.getItem('asu-date-range-open') === '1') {
+  if (store.get('asu-date-range-open') === '1') {
     document.getElementById('date-range-body').style.display = 'block';
     document.getElementById('date-range-arrow').textContent = '▼';
   }
@@ -359,7 +226,7 @@ function toggleDateRange() {
   const isOpen = body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
   arrow.textContent = isOpen ? '▶' : '▼';
-  try { localStorage.setItem('asu-date-range-open', isOpen ? '0' : '1'); } catch {}
+  store.set('asu-date-range-open', isOpen ? '0' : '1');
 }
 
 function copyIcsUrl() {
@@ -389,7 +256,7 @@ function clearFilters() {
   document.getElementById('filter-to').value = '';
   document.getElementById('date-range-body').style.display = 'none';
   document.getElementById('date-range-arrow').textContent = '▶';
-  try { localStorage.removeItem('asu-date-range-open'); } catch {}
+  store.remove('asu-date-range-open');
   rebuildStateDropdown('');
 
   window.reloadEvents && window.reloadEvents();
@@ -421,13 +288,6 @@ async function fetchEvents() {
 
 // ── Modal ──────────────────────────────────────────────
 
-function shortTitle(title) {
-  if (!title) return 'Event';
-  return title
-    .replace(/^Sun Devil [^:]+:\s*/i, '')
-    .replace(/^Arizona State\s+/i, '');
-}
-
 function cleanDisplayAddress(addr) {
   if (!addr) return '';
   return addr
@@ -438,26 +298,7 @@ function cleanDisplayAddress(addr) {
     .replace(/,\s*$/, '');
 }
 
-function formatTs(ts) {
-  if (!ts) return '';
-  const d = new Date(ts * 1000);
-  // Midnight Phoenix = feed placeholder for "time unknown" — show date only (no time).
-  // Keep the Phoenix check here since it's a feed artifact, not a display concern.
-  const phoenixTime = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix' });
-  if (phoenixTime === '12:00 AM') {
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Phoenix' });
-  }
-  return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Phoenix', timeZoneName: 'short' });
-}
-
 // ── Game Detail Modal (box score) ─────────────────────────────────────────────
-
-function _gmEsc(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 
 let _gmEscKey = null;
 
@@ -504,13 +345,13 @@ window.openGameDetailModal = function(espnEventId, sport, fallback) {
 function _gmRenderFallback(container, fallback) {
   if (!fallback) { container.innerHTML = ''; return; }
   const hdr = `<div class="gm-header">
-    <div class="gm-headline">${_gmEsc(fallback.sport || '')}</div>
-    <div style="font-size:1.1rem;font-weight:700;color:white;margin-bottom:8px;padding-right:36px">${_gmEsc(shortTitle(fallback.title || ''))}</div>
+    <div class="gm-headline">${esc(fallback.sport || '')}</div>
+    <div style="font-size:1.1rem;font-weight:700;color:white;margin-bottom:8px;padding-right:36px">${esc(shortTitle(fallback.title || ''))}</div>
   </div>`;
   const rows = [];
-  if (fallback.startTime) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📅</span><span class="gm-fallback-label">When</span><span class="gm-fallback-value">${_gmEsc(formatTs(fallback.startTime))}</span></div>`);
-  if (fallback.location) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📍</span><span class="gm-fallback-label">Venue</span><span class="gm-fallback-value">${_gmEsc(fallback.location)}</span></div>`);
-  if (fallback.tvNetwork) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📺</span><span class="gm-fallback-label">TV</span><span class="gm-fallback-value">${_gmEsc(fallback.tvNetwork)}</span></div>`);
+  if (fallback.startTime) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📅</span><span class="gm-fallback-label">When</span><span class="gm-fallback-value">${esc(formatTs(fallback.startTime))}</span></div>`);
+  if (fallback.location) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📍</span><span class="gm-fallback-label">Venue</span><span class="gm-fallback-value">${esc(fallback.location)}</span></div>`);
+  if (fallback.tvNetwork) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📺</span><span class="gm-fallback-label">TV</span><span class="gm-fallback-value">${esc(fallback.tvNetwork)}</span></div>`);
   container.innerHTML = hdr + (rows.length ? `<div class="gm-fallback">${rows.join('')}</div>` : '');
 }
 
@@ -550,35 +391,35 @@ function _gmRenderStats(container, data, sport) {
 
   function teamLogoHtml(team) {
     const logo = team?.team?.logos?.[0]?.href || team?.team?.logo;
-    if (logo) return `<img class="gm-team-logo" src="${_gmEsc(logo)}" alt="" loading="lazy">`;
-    return `<div class="gm-team-logo-placeholder">${_gmEsc((team?.team?.abbreviation || '???').slice(0,3).toUpperCase())}</div>`;
+    if (logo) return `<img class="gm-team-logo" src="${esc(logo)}" alt="" loading="lazy">`;
+    return `<div class="gm-team-logo-placeholder">${esc((team?.team?.abbreviation || '???').slice(0,3).toUpperCase())}</div>`;
   }
 
   const metaRows = [];
   const locStr = [venue, [city, stateName].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
-  if (locStr) metaRows.push(`<div class="gm-meta-row">📍 ${_gmEsc(locStr)}</div>`);
+  if (locStr) metaRows.push(`<div class="gm-meta-row">📍 ${esc(locStr)}</div>`);
   if (attend) metaRows.push(`<div class="gm-meta-row">👥 Att: ${attend.toLocaleString()}</div>`);
-  if (bcast)  metaRows.push(`<div class="gm-meta-row">📺 ${_gmEsc(bcast)}</div>`);
+  if (bcast)  metaRows.push(`<div class="gm-meta-row">📺 ${esc(bcast)}</div>`);
 
   const hdrHtml = `
     <div class="gm-header">
-      <div class="gm-headline">${_gmEsc(headline || sport || '')}</div>
+      <div class="gm-headline">${esc(headline || sport || '')}</div>
       <div class="gm-scores">
         <div class="gm-team">
           ${asuTeam ? teamLogoHtml(asuTeam) : '<div class="gm-team-logo-placeholder">ASU</div>'}
-          <div class="gm-team-name">${_gmEsc(asuTeam?.team?.displayName || 'Arizona State')}</div>
-          <div class="gm-score${asuWins ? ' gm-winner' : ''}">${_gmEsc(asuTeam?.score ?? '–')}</div>
+          <div class="gm-team-name">${esc(asuTeam?.team?.displayName || 'Arizona State')}</div>
+          <div class="gm-score${asuWins ? ' gm-winner' : ''}">${esc(asuTeam?.score ?? '–')}</div>
         </div>
         <div class="gm-vs">–</div>
         <div class="gm-team">
           ${oppTeam ? teamLogoHtml(oppTeam) : '<div class="gm-team-logo-placeholder">OPP</div>'}
-          <div class="gm-team-name">${_gmEsc(oppTeam?.team?.displayName || 'Opponent')}</div>
-          <div class="gm-score${oppWins ? ' gm-winner' : ''}">${_gmEsc(oppTeam?.score ?? '–')}</div>
+          <div class="gm-team-name">${esc(oppTeam?.team?.displayName || 'Opponent')}</div>
+          <div class="gm-score${oppWins ? ' gm-winner' : ''}">${esc(oppTeam?.score ?? '–')}</div>
         </div>
       </div>
       <div class="gm-status">
-        <span class="gm-status-badge ${badgeCls}">${_gmEsc(badgeText)}</span>
-        ${shortDetail && !completed ? `<span class="gm-status-detail">${_gmEsc(shortDetail)}</span>` : ''}
+        <span class="gm-status-badge ${badgeCls}">${esc(badgeText)}</span>
+        ${shortDetail && !completed ? `<span class="gm-status-detail">${esc(shortDetail)}</span>` : ''}
       </div>
       ${metaRows.length ? `<div class="gm-meta">${metaRows.join('')}</div>` : ''}
     </div>`;
@@ -628,7 +469,7 @@ function _gmBuildLinescore(comp, competitors, asuTeam, sport) {
     const ls   = comp?.linescores || [];
     const score = comp?.score ?? '–';
     const cells = Array.from({ length: n }, (_, i) =>
-      `<td>${_gmEsc(ls[i]?.displayValue ?? '–')}</td>`).join('');
+      `<td>${esc(ls[i]?.displayValue ?? '–')}</td>`).join('');
 
     let rheCells;
     if (isBaseball) {
@@ -636,15 +477,15 @@ function _gmBuildLinescore(comp, competitors, asuTeam, sport) {
       const hasE = ls.some(c => c?.errors != null);
       const totalH = hasH ? ls.reduce((s, c) => s + (c?.hits ?? 0), 0) : null;
       const totalE = hasE ? ls.reduce((s, c) => s + (c?.errors ?? 0), 0) : null;
-      rheCells = `<td class="gm-ls-rhe"><strong>${_gmEsc(score)}</strong></td><td class="gm-ls-rhe">${totalH != null ? totalH : '–'}</td><td class="gm-ls-rhe">${totalE != null ? totalE : '–'}</td>`;
+      rheCells = `<td class="gm-ls-rhe"><strong>${esc(score)}</strong></td><td class="gm-ls-rhe">${totalH != null ? totalH : '–'}</td><td class="gm-ls-rhe">${totalE != null ? totalE : '–'}</td>`;
     } else {
-      rheCells = `<td><strong>${_gmEsc(score)}</strong></td>`;
+      rheCells = `<td><strong>${esc(score)}</strong></td>`;
     }
     const cls = isWin ? ' class="gm-linescore-winner"' : '';
-    return `<tr${cls}><td><strong>${_gmEsc(abbr)}</strong></td>${cells}${rheCells}</tr>`;
+    return `<tr${cls}><td><strong>${esc(abbr)}</strong></td>${cells}${rheCells}</tr>`;
   }
 
-  const pHtml  = periodHdrs.map(h => `<th>${_gmEsc(h)}</th>`).join('');
+  const pHtml  = periodHdrs.map(h => `<th>${esc(h)}</th>`).join('');
   const rhHtml = isBaseball ? '<th class="gm-ls-rhe">R</th><th class="gm-ls-rhe">H</th><th class="gm-ls-rhe">E</th>' : '<th>Total</th>';
 
   return `<div class="gm-linescore"><table class="gm-linescore-table">
@@ -674,15 +515,15 @@ function _gmBuildBoxScore(boxscore, asuTeam, sport) {
       const labels   = grp.labels || [];
       const athletes = grp.athletes || [];
       if (!athletes.length) return '';
-      const thCells = labels.map(l => `<th>${_gmEsc(l)}</th>`).join('');
+      const thCells = labels.map(l => `<th>${esc(l)}</th>`).join('');
       const rows = athletes.map(a => {
         const starter = a.starter === true;
-        const cells   = (a.stats || []).map(s => `<td>${_gmEsc(s)}</td>`).join('');
+        const cells   = (a.stats || []).map(s => `<td>${esc(s)}</td>`).join('');
         const cls     = [starter ? 'st-starter' : '', isAsu ? 'st-asu-row' : ''].filter(Boolean).join(' ');
-        return `<tr class="${cls}"><td>${_gmEsc(a.athlete?.displayName || '')}</td>${cells}</tr>`;
+        return `<tr class="${cls}"><td>${esc(a.athlete?.displayName || '')}</td>${cells}</tr>`;
       }).join('');
       return `<div class="gm-stats-section">
-        <div class="gm-stats-team-header">${_gmEsc(tName)}</div>
+        <div class="gm-stats-team-header">${esc(tName)}</div>
         <div class="gm-stats-table-wrap"><table class="gm-stats-table">
           <thead><tr><th>Player</th>${thCells}</tr></thead>
           <tbody>${rows}</tbody>
@@ -885,12 +726,12 @@ function setView(view) {
     window.renderListView && window.renderListView();
   }
 
-  localStorage.setItem('asu-cal-view', view);
+  store.set('asu-cal-view', view);
 }
 
 // Init — wait for all scripts to parse before calling setView/renderLiveView.
 document.addEventListener('DOMContentLoaded', () => {
-  const savedView = localStorage.getItem('asu-cal-view') || 'live';
+  const savedView = store.get('asu-cal-view') || 'live';
   setView(savedView);
   loadFilterOptions();
 });
@@ -898,7 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Restore correct tab and restart polling after iOS Safari bfcache restore.
 window.addEventListener('pageshow', (e) => {
   if (e.persisted) {
-    const v = localStorage.getItem('asu-cal-view') || 'live';
+    const v = store.get('asu-cal-view') || 'live';
     setView(v);
     window.startLivePolling && window.startLivePolling();
   }
