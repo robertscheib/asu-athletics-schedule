@@ -2,6 +2,7 @@ const webpush = require('web-push');
 const { getGameSubscribersForType, deletePushSubscription, getEventById, markFinalPushSent } = require('./db');
 const { opponentFromTitle } = require('./lib/opponent');
 const { SITE_ORIGIN } = require('./lib/constants');
+const { SPORT_EMOJI } = require('./lib/sports-config');
 
 // VAPID env may be loaded after this module (loadSecretsFallback runs in the
 // entry point), so details are applied per-send rather than at require time.
@@ -12,30 +13,6 @@ function ensureVapid() {
     process.env.VAPID_PRIVATE_KEY,
   );
 }
-
-const SPORT_EMOJI = {
-  'Football':             '🏈',
-  "Men's Basketball":     '🏀',
-  "Women's Basketball":   '🏀',
-  'Basketball':           '🏀',
-  'Baseball':             '⚾',
-  'Softball':             '🥎',
-  "Women's Soccer":       '⚽',
-  "Men's Soccer":         '⚽',
-  'Soccer':               '⚽',
-  "Women's Volleyball":   '🏐',
-  'Volleyball':           '🏐',
-  "Golf (Men's)":         '⛳',
-  "Golf (Women's)":       '⛳',
-  "Tennis (Men's)":       '🎾',
-  "Tennis (Women's)":     '🎾',
-  'Swimming':             '🏊',
-  'Swimming & Diving':    '🏊',
-  'Track and Field':      '🏃',
-  'Cross Country':        '🏃',
-  'Wrestling':            '🤼',
-  'Gymnastics':           '🤸',
-};
 
 function buildPayload(event) {
   const emoji = SPORT_EMOJI[event.sport] || '🏟️';
