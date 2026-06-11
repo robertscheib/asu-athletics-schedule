@@ -129,34 +129,31 @@ function renderRecordWidget(records) {
     </div>`;
 }
 
-function _renderLiveView(games, tournaments, nextGame, records) {
-  const container = document.getElementById('live-view');
-  if (!container) return;
-
-  clearCountdown();
-
-  const liveGames     = games.filter(g => g.state === 'live');
-  const upcomingGames = games.filter(g => g.state === 'upcoming');
-  const finalGames    = games.filter(g => g.state === 'final');
-
-  // If there are baseball games but no baseball bracket tournament detected (e.g. ESPN notes
-  // missing or DB event not synced), inject a synthetic baseball bracket tournament so the
-  // NCAA bracket section always shows during postseason.
+// If there are baseball games but no baseball bracket tournament detected (e.g. ESPN notes
+// missing or DB event not synced), inject a synthetic baseball bracket tournament so the
+// NCAA bracket section always shows during postseason.
+function _injectSyntheticBaseballBracket(tournaments, games) {
   const hasBracketTourney = tournaments.some(t => t.sport === 'Baseball' && t.format === 'bracket');
   const baseballMonth = new Date().getMonth(); // 0-indexed; 4=May 5=June
   const hasBaseballGames = games.some(g => g.sport === 'Baseball');
-  if (!hasBracketTourney && hasBaseballGames && (baseballMonth === 4 || baseballMonth === 5)) {
-    tournaments = [...tournaments, {
-      id: 'ncaa-baseball-auto',
-      sport: 'Baseball',
-      name: 'NCAA Regional',
-      format: 'bracket',
-      bracketReady: false,
-      rounds: [],
-      games: [],
-    }];
+  if (hasBracketTourney || !hasBaseballGames || (baseballMonth !== 4 && baseballMonth !== 5)) {
+    return tournaments;
   }
+  return [...tournaments, {
+    id: 'ncaa-baseball-auto',
+    sport: 'Baseball',
+    name: 'NCAA Regional',
+    format: 'bracket',
+    bracketReady: false,
+    rounds: [],
+    games: [],
+  }];
+}
 
+// Builds the full live-view HTML. Also starts the upcoming-games countdown as
+// a side effect (matching the original inline flow — it is restarted again
+// after the DOM insert in _afterRenderHooks).
+function _buildLiveSections(liveGames, upcomingGames, finalGames, tournaments, nextGame, records) {
   let html = _buildNotifyBar();
 
   if (liveGames.length > 0) {
@@ -211,8 +208,11 @@ function _renderLiveView(games, tournaments, nextGame, records) {
       </div>`;
   }
 
-  container.innerHTML = html;
+  return html;
+}
 
+// Post-innerHTML wiring: click delegation, NCAA bracket async load, countdowns.
+function _afterRenderHooks(container, games, liveGames, upcomingGames, finalGames, nextGame) {
   // Set up delegated click handler for game cards (add once; survives innerHTML resets)
   if (!container._hasCardClicks) {
     container._hasCardClicks = true;
@@ -238,6 +238,23 @@ function _renderLiveView(games, tournaments, nextGame, records) {
   }
 }
 
+function _renderLiveView(games, tournaments, nextGame, records) {
+  const container = document.getElementById('live-view');
+  if (!container) return;
+
+  clearCountdown();
+
+  const liveGames     = games.filter(g => g.state === 'live');
+  const upcomingGames = games.filter(g => g.state === 'upcoming');
+  const finalGames    = games.filter(g => g.state === 'final');
+
+  tournaments = _injectSyntheticBaseballBracket(tournaments, games);
+
+  container.innerHTML = _buildLiveSections(liveGames, upcomingGames, finalGames, tournaments, nextGame, records);
+
+  _afterRenderHooks(container, games, liveGames, upcomingGames, finalGames, nextGame);
+}
+
 function _handleCardClick(e) {
   if (e.target.closest('[data-bell-event-id]')) return; // handled by pwa.js delegation
   const card = e.target.closest('[data-espn-id]');
@@ -260,22 +277,24 @@ function sectionHeader(innerHTML, pulse) {
 
 // ── Game card ─────────────────────────────────────────────────────────────────
 
-function renderGameCard(game) {
-  const stateClass    = game.state === 'live' ? 'card-live' : game.state === 'upcoming' ? 'card-upcoming' : 'card-final';
-  const clickableClass = game.espnEventId ? ' card-clickable' : '';
-  const espnAttrs = game.espnEventId
-    ? `data-espn-id="${esc(game.espnEventId)}" data-sport="${esc(game.sport || '')}" data-title="${esc(game.title || '')}" data-start-time="${game.startTime || ''}" data-location="${esc(game.location || (game.city ? [game.city, game.stateAbbr].filter(Boolean).join(', ') : '') || '')}" data-tv="${esc(game.tvNetwork || '')}"`
-    : '';
-
-  const statusBadge = game.state === 'live'
+function _cardStatusBadge(game) {
+  return game.state === 'live'
     ? `<span class="live-status-badge live-status-live"><span class="live-dot-sm"></span>LIVE</span>`
     : game.state === 'final'
     ? `<span class="live-status-badge live-status-final">FINAL</span>`
     : `<span class="live-status-badge live-status-upcoming">UPCOMING</span>`;
+}
 
-  const tvBadge = game.tvNetwork
-    ? `<span class="live-card-tv">${esc(game.tvNetwork)}</span>` : '';
+function _cardBellHtml(game) {
+  const nowTs = Math.floor(Date.now() / 1000);
+  const isFuture = game.startTime && game.startTime > nowTs;
+  const bellTooltip = game.state === 'live' ? 'Notify me when this game ends' : 'Subscribe to this game';
+  return game.dbEventId
+    ? window.bellIconHTML(game.dbEventId, isFuture || game.state === 'live', bellTooltip, game.sport)
+    : '';
+}
 
+function _cardMatchupHtml(game) {
   const asuLogoSvg = `<div class="live-card-asu-badge"><img src="/sparky.png" alt="ASU" style="width:32px;height:32px;object-fit:contain;" onerror="this.parentElement.textContent='🔱'"></div>`;
   const oppLogoEl  = game.oppLogo
     ? `<img class="live-card-logo" src="${esc(game.oppLogo)}" alt="${esc(game.oppName)}" loading="lazy" />`
@@ -290,33 +309,7 @@ function renderGameCard(game) {
     ? `<div class="live-card-vs">${esc(game.situation === 'TBD' ? 'TBD' : formatGameTime(game.startTime))}</div>`
     : `<div class="live-card-vs">–</div>`;
 
-  const sportDetailsHtml = renderSportDetails(game);
-
-  const situationHtml = game.situation
-    ? `<div class="live-card-situation">${esc(game.situation)}</div>` : '';
-
-  const locationParts = [];
-  if (game.location) locationParts.push(game.location);
-  else if (game.city) locationParts.push([game.city, game.stateAbbr].filter(Boolean).join(', '));
-  const locationHtml = locationParts.length
-    ? `<div class="live-card-meta">📍 ${esc(locationParts[0])}</div>` : '';
-
-  const nowTs = Math.floor(Date.now() / 1000);
-  const isFuture = game.startTime && game.startTime > nowTs;
-  const bellTooltip = game.state === 'live' ? 'Notify me when this game ends' : 'Subscribe to this game';
-  const bellHtml = game.dbEventId
-    ? window.bellIconHTML(game.dbEventId, isFuture || game.state === 'live', bellTooltip, game.sport)
-    : '';
-
-  return `
-    <div class="live-card ${stateClass}${clickableClass}" data-event-id="${esc(game.dbEventId || '')}" ${espnAttrs}>
-      <div class="live-card-header">
-        <span class="live-card-sport">${esc(game.sport)}</span>
-        ${statusBadge}
-        ${tvBadge}
-        ${bellHtml}
-      </div>
-      <div class="live-card-matchup">
+  return `<div class="live-card-matchup">
         <div class="live-card-team">
           ${asuLogoSvg}
           <div class="live-card-team-name">Arizona State</div>
@@ -328,9 +321,43 @@ function renderGameCard(game) {
           <div class="live-card-team-name">${esc(shortOppName(game.oppName))}</div>
           ${oppScoreEl}
         </div>
+      </div>`;
+}
+
+function _cardFooterHtml(game) {
+  const situationHtml = game.situation
+    ? `<div class="live-card-situation">${esc(game.situation)}</div>` : '';
+
+  const locationParts = [];
+  if (game.location) locationParts.push(game.location);
+  else if (game.city) locationParts.push([game.city, game.stateAbbr].filter(Boolean).join(', '));
+  const locationHtml = locationParts.length
+    ? `<div class="live-card-meta">📍 ${esc(locationParts[0])}</div>` : '';
+
+  return situationHtml || locationHtml ? `<div class="live-card-footer">${situationHtml}${locationHtml}</div>` : '';
+}
+
+function renderGameCard(game) {
+  const stateClass    = game.state === 'live' ? 'card-live' : game.state === 'upcoming' ? 'card-upcoming' : 'card-final';
+  const clickableClass = game.espnEventId ? ' card-clickable' : '';
+  const espnAttrs = game.espnEventId
+    ? `data-espn-id="${esc(game.espnEventId)}" data-sport="${esc(game.sport || '')}" data-title="${esc(game.title || '')}" data-start-time="${game.startTime || ''}" data-location="${esc(game.location || (game.city ? [game.city, game.stateAbbr].filter(Boolean).join(', ') : '') || '')}" data-tv="${esc(game.tvNetwork || '')}"`
+    : '';
+
+  const tvBadge = game.tvNetwork
+    ? `<span class="live-card-tv">${esc(game.tvNetwork)}</span>` : '';
+
+  return `
+    <div class="live-card ${stateClass}${clickableClass}" data-event-id="${esc(game.dbEventId || '')}" ${espnAttrs}>
+      <div class="live-card-header">
+        <span class="live-card-sport">${esc(game.sport)}</span>
+        ${_cardStatusBadge(game)}
+        ${tvBadge}
+        ${_cardBellHtml(game)}
       </div>
-      ${sportDetailsHtml}
-      ${situationHtml || locationHtml ? `<div class="live-card-footer">${situationHtml}${locationHtml}</div>` : ''}
+      ${_cardMatchupHtml(game)}
+      ${renderSportDetails(game)}
+      ${_cardFooterHtml(game)}
     </div>`;
 }
 
@@ -574,18 +601,7 @@ function _renderNcaaGameCard(game) {
     ? `data-espn-id="${esc(game.espnEventId)}" data-sport="Baseball"`
     : '';
 
-  // Card header content
-  let headerHtml = '';
-  if (isLive) {
-    headerHtml = `<span class="ncaa-live-badge">LIVE</span> ${esc(game.currentPeriod || '')}`;
-  } else if (isFinal) {
-    headerHtml = `<span class="ncaa-final-badge">Final</span>`;
-  } else {
-    const parts = [];
-    if (game.startDate) parts.push(_ncaaFormatDate(game.startDate));
-    if (game.broadcaster?.name) parts.push(esc(game.broadcaster.name));
-    headerHtml = parts.join(' · ');
-  }
+  const headerHtml = _ncaaCardHeader(game, isLive, isFinal);
 
   const teams = game.teams || [];
   const row1  = _renderNcaaTeamRow(teams[0] || null, isFinal, isLive);
@@ -595,6 +611,19 @@ function _renderNcaaGameCard(game) {
     <div class="ncaa-card-header">${headerHtml}</div>
     ${row1}${row2}
   </div>`;
+}
+
+function _ncaaCardHeader(game, isLive, isFinal) {
+  if (isLive) {
+    return `<span class="ncaa-live-badge">LIVE</span> ${esc(game.currentPeriod || '')}`;
+  }
+  if (isFinal) {
+    return `<span class="ncaa-final-badge">Final</span>`;
+  }
+  const parts = [];
+  if (game.startDate) parts.push(_ncaaFormatDate(game.startDate));
+  if (game.broadcaster?.name) parts.push(esc(game.broadcaster.name));
+  return parts.join(' · ');
 }
 
 function _renderNcaaTeamRow(team, isFinal, isLive) {
