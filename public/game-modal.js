@@ -57,7 +57,10 @@ function _gmRenderFallback(container, fallback) {
   if (fallback.startTime) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📅</span><span class="gm-fallback-label">When</span><span class="gm-fallback-value">${esc(formatTs(fallback.startTime))}</span></div>`);
   if (fallback.location) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📍</span><span class="gm-fallback-label">Venue</span><span class="gm-fallback-value">${esc(fallback.location)}</span></div>`);
   if (fallback.tvNetwork) rows.push(`<div class="gm-fallback-row"><span class="gm-fallback-icon">📺</span><span class="gm-fallback-label">TV</span><span class="gm-fallback-value">${esc(fallback.tvNetwork)}</span></div>`);
-  container.innerHTML = hdr + (rows.length ? `<div class="gm-fallback">${rows.join('')}</div>` : '');
+  container.innerHTML = hdr
+    + (rows.length ? `<div class="gm-fallback">${rows.join('')}</div>` : '')
+    + '<div id="gm-h2h"></div>';
+  window.loadH2hInto('gm-h2h', fallback.sport, fallback.title);
 }
 
 function _gmRenderStats(container, data, sport) {
@@ -129,11 +132,130 @@ function _gmRenderStats(container, data, sport) {
       ${metaRows.length ? `<div class="gm-meta">${metaRows.join('')}</div>` : ''}
     </div>`;
 
-  const lsHtml   = _gmBuildLinescore(comp, competitors, asuTeam, sport);
-  const boxHtml  = _gmBuildBoxScore(data?.boxscore, asuTeam, sport);
+  const lsHtml = _gmBuildLinescore(comp, competitors, asuTeam, sport);
+  const box    = _gmBuildBoxScore(data?.boxscore, asuTeam, sport);
+  const plays  = _gmBuildPlays(data, sport, asuTeam, competitors);
 
-  container.innerHTML = hdrHtml + `<div class="gm-body">${lsHtml}${boxHtml}</div>`;
+  const tabs = [...box.tabs, ...(plays ? [plays.tab] : [])];
+  const tabsHtml = tabs.length
+    ? `<div class="gm-tabs">${tabs.map(t =>
+        `<button class="gm-tab" onclick="switchGameTab(this,'${t.id}')">${esc(t.label)}</button>`).join('')}</div>`
+    : '';
+
+  container.innerHTML = hdrHtml +
+    `<div class="gm-body"><div id="gm-h2h"></div>${lsHtml}${tabsHtml}${box.panels}${plays ? plays.panel : ''}</div>`;
   container.querySelector('.gm-tab')?.click();
+  window.loadH2hInto('gm-h2h', sport, oppTeam?.team?.displayName);
+}
+
+// ── Scoring plays tab ─────────────────────────────────────────────────────────
+// Football summaries ship ready-made scoringPlays; baseball/softball and
+// basketball flag scoring plays inside the full pitch/possession play list.
+
+function _gmOrdinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4)] || 'th';
+  return `${n}${s}`;
+}
+
+function _gmPeriodLabel(sport, period) {
+  const n = period?.number;
+  if (period?.type && period?.displayValue) {
+    return `${period.type} ${period.displayValue.replace(/ Inning$/, '')}`; // "Top 1st"
+  }
+  if (!n) return '';
+  if (sport === 'Football') return n <= 4 ? `${_gmOrdinal(n)} Quarter` : `OT${n > 5 ? n - 4 : ''}`;
+  if (sport === "Men's Basketball" || sport === 'Basketball') return n <= 2 ? `${_gmOrdinal(n)} Half` : `OT${n > 3 ? n - 2 : ''}`;
+  if (sport === "Women's Basketball") return n <= 4 ? `${_gmOrdinal(n)} Quarter` : `OT${n > 5 ? n - 4 : ''}`;
+  return period?.displayValue || _gmOrdinal(n);
+}
+
+function _gmBuildPlays(data, sport, asuTeam, competitors) {
+  const asuTeamId = String(asuTeam?.team?.id ?? asuTeam?.id ?? '');
+  const raw = data?.scoringPlays?.length
+    ? data.scoringPlays
+    : (data?.plays || []).filter(p => p.scoringPlay === true);
+  if (!raw.length) return null;
+
+  const away = competitors.find(c => c.homeAway === 'away');
+  const home = competitors.find(c => c.homeAway === 'home');
+  const awayAbbr = (away?.team?.abbreviation || 'AWAY').toUpperCase();
+  const homeAbbr = (home?.team?.abbreviation || 'HOME').toUpperCase();
+
+  const groups = [];
+  for (const p of raw) {
+    const label = _gmPeriodLabel(sport, p.period);
+    if (!groups.length || groups[groups.length - 1].label !== label) {
+      groups.push({ label, plays: [] });
+    }
+    groups[groups.length - 1].plays.push(p);
+  }
+
+  const groupsHtml = groups.map(g => {
+    const rows = g.plays.map(p => {
+      const isAsu = p.team?.id != null && String(p.team.id) === asuTeamId;
+      const side = [
+        p.clock?.displayValue ? `<span class="gm-play-clock">${esc(p.clock.displayValue)}</span>` : '',
+        p.awayScore != null && p.homeScore != null
+          ? `<span class="gm-play-score">${esc(awayAbbr)} ${esc(p.awayScore)}, ${esc(homeAbbr)} ${esc(p.homeScore)}</span>`
+          : '',
+      ].join('');
+      const typeText = p.type?.text && p.type.text !== 'Play Result' ? p.type.text : '';
+      return `<div class="gm-play-row${isAsu ? ' gm-play-asu' : ''}">
+        <div class="gm-play-main">
+          ${typeText ? `<span class="gm-play-type">${esc(typeText)}</span>` : ''}
+          <span class="gm-play-text">${esc(p.text || '')}</span>
+        </div>
+        <div class="gm-play-side">${side}</div>
+      </div>`;
+    }).join('');
+    return `<div class="gm-plays-group">
+      ${g.label ? `<div class="gm-plays-period">${esc(g.label)}</div>` : ''}
+      ${rows}
+    </div>`;
+  }).join('');
+
+  return {
+    tab: { id: 'gm-plays', label: 'Scoring' },
+    panel: `<div id="gm-plays" class="gm-tab-panel">${groupsHtml}</div>`,
+  };
+}
+
+// ── Head-to-head strip (local DB via /api/h2h) ────────────────────────────────
+// Shared with the plain event modal in filters.js, hence window-exposed.
+
+window.loadH2hInto = function(elId, sport, opponent) {
+  if (!sport || !opponent) return;
+  fetch(`/api/h2h?sport=${encodeURIComponent(sport)}&opponent=${encodeURIComponent(opponent)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      const el = document.getElementById(elId);
+      if (!el || !d || !d.games) return;
+      el.innerHTML = _h2hStripHtml(d);
+    })
+    .catch(() => {});
+};
+
+function _h2hStripHtml(d) {
+  const name = shortOppName(d.opponent);
+  const lead = d.w > d.l ? `ASU leads ${d.w}–${d.l}`
+    : d.l > d.w ? `${esc(name)} leads ${d.l}–${d.w}`
+    : `Series tied ${d.w}–${d.l}`;
+  const tie = d.t ? ` (${d.t} tie${d.t > 1 ? 's' : ''})` : '';
+  const rows = d.meetings.map(m => {
+    const date = new Date(m.startDate * 1000)
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const cls = m.result === 'W' ? 'score-w' : m.result === 'L' ? 'score-l' : 'score-t';
+    const where = m.gameType ? m.gameType.charAt(0).toUpperCase() + m.gameType.slice(1) : '';
+    return `<div class="h2h-row">
+      <span class="h2h-date">${esc(date)}</span>
+      <span class="score-badge ${cls}">${esc(m.result)} ${esc(m.asuScore)}–${esc(m.oppScore)}</span>
+      <span class="h2h-where">${esc(where)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="h2h-strip">
+    <div class="h2h-head">Head-to-head vs ${esc(name)} · <strong>${lead}${tie}</strong></div>
+    <div class="h2h-rows">${rows}</div>
+  </div>`;
 }
 
 function _gmBuildLinescore(comp, competitors, asuTeam, sport) {
@@ -200,7 +322,7 @@ function _gmBuildLinescore(comp, competitors, asuTeam, sport) {
 }
 
 function _gmBuildBoxScore(boxscore, asuTeam, sport) {
-  if (!boxscore?.players?.length) return '';
+  if (!boxscore?.players?.length) return { tabs: [], panels: '' };
   const isBaseball = sport === 'Baseball' || sport === 'Softball';
   const asuName = asuTeam?.team?.displayName || '';
 
@@ -239,16 +361,14 @@ function _gmBuildBoxScore(boxscore, asuTeam, sport) {
   }
 
   if (isBaseball) {
-    return `<div class="gm-tabs">
-      <button class="gm-tab" onclick="switchGameTab(this,'gm-batting')">Batting</button>
-      <button class="gm-tab" onclick="switchGameTab(this,'gm-pitching')">Pitching</button>
-    </div>
-    ${buildPanel(0, 'gm-batting')}
-    ${buildPanel(1, 'gm-pitching')}`;
+    return {
+      tabs: [{ id: 'gm-batting', label: 'Batting' }, { id: 'gm-pitching', label: 'Pitching' }],
+      panels: buildPanel(0, 'gm-batting') + buildPanel(1, 'gm-pitching'),
+    };
   }
 
-  return `<div class="gm-tabs">
-    <button class="gm-tab" onclick="switchGameTab(this,'gm-stats')">Player Stats</button>
-  </div>
-  ${buildPanel(0, 'gm-stats')}`;
+  return {
+    tabs: [{ id: 'gm-stats', label: 'Player Stats' }],
+    panels: buildPanel(0, 'gm-stats'),
+  };
 }

@@ -15,6 +15,7 @@ const { TtlCache } = require('./lib/cache');
 const { buildIcsCalendar } = require('./lib/ical');
 const ncaa = require('./lib/ncaa');
 const standings = require('./lib/standings');
+const { getHeadToHead } = require('./lib/h2h');
 
 loadSecretsFallback();
 
@@ -270,6 +271,23 @@ app.get('/api/standings', generalLimit, async (req, res) => {
   } catch (err) {
     console.error('[api] /api/standings error:', err.message);
     res.status(502).json({ error: 'ESPN unavailable' });
+  }
+});
+
+// ── Head-to-head vs opponent (local DB) ───────────────────────────────────────
+
+app.get('/api/h2h', generalLimit, (req, res) => {
+  try {
+    const { sport, opponent } = req.query;
+    if (!sport || !opponent) {
+      return res.status(400).json({ error: 'sport and opponent are required' });
+    }
+    const result = getHeadToHead(sport, opponent);
+    if (!result) return res.status(400).json({ error: 'Could not parse opponent' });
+    res.json(result);
+  } catch (err) {
+    console.error('[api] /api/h2h error:', err.message);
+    res.status(500).json({ error: 'Failed to compute head-to-head' });
   }
 });
 
