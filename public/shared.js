@@ -195,6 +195,25 @@ function opponentInitial(title) {
   return cleaned.charAt(0).toUpperCase() || '?';
 }
 
+// ── Theme (dark mode) ─────────────────────────────────────────────────────────
+// data-theme is set pre-paint by an inline <head> script; this only handles
+// the toggle + button glyph. Stored choice wins over the system preference.
+
+function _syncThemeButton() {
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀️' : '🌙';
+}
+
+window.toggleTheme = function() {
+  const dark = document.documentElement.dataset.theme !== 'dark';
+  if (dark) document.documentElement.dataset.theme = 'dark';
+  else delete document.documentElement.dataset.theme;
+  store.set('asu-theme', dark ? 'dark' : 'light');
+  _syncThemeButton();
+};
+
+document.addEventListener('DOMContentLoaded', _syncThemeButton);
+
 window.makeLogoPlaceholder = function(title, color) {
   const el = document.createElement('div');
   el.className = 'list-event-logo-placeholder';

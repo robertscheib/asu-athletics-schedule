@@ -117,3 +117,20 @@ change a frontend file, bump its `?v=` AND bump `CACHE_NAME` in sw.js if index.h
   filters v19, style v7, SW asu-cal-v8. Verified headless-chromium on :3100 (football
   + baseball scoring tabs, both h2h strips) and prod after restart. Phase 3 next:
   My Sports favorites, dark mode, TV/ticket links on list cards.
+- [2026-06-12 (Claude Code)]: Roadmap phase 3 shipped: My Sports favorites, dark mode,
+  ticket links. Favorites: ★ button per sidebar sport row (store key asu-fav-sports);
+  starred sports are pre-checked at load so every view starts filtered; Clear All
+  unchecks but keeps stars. Found+fixed pre-existing bug: setView('calendar') never
+  refetched, so filters applied while another view was active (incl. the new pre-check)
+  showed a stale unfiltered calendar — now refetchEvents() on switch. Dark mode:
+  [data-theme=dark] CSS-var block (color-scheme:dark for UA controls), new --asu-tint/
+  --gold-tint/--ink-accent vars (ink-accent = maroon in light / gold in dark — all
+  `color: var(--maroon)` text usages were swapped to it; accent-color left maroon),
+  FC --fc-* var overrides + Leaflet popup/tile rules, light backplate on dark team
+  logos, inline head script applies stored theme (else prefers-color-scheme) pre-paint,
+  🌙/☀️ header button (toggleTheme in shared.js, store key asu-theme). Ticket links:
+  🎟 pill on future list cards (stopPropagation vs row click) + 📺 prefix on TV network.
+  Also removed the dead fullcalendar CSS <link> (the 404 noted earlier). Bumps: shared
+  v3, filters v20, calendar v14, style v8, SW asu-cal-v9. Verified headless-chromium
+  dark screenshots on :3100 + prod after restart. Phase 4 (final) next: ESPN team news
+  strip on Live tab + per-sport rosters/leaders.

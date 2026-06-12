@@ -91,20 +91,30 @@ async function loadFilterOptions() {
 
   allLocations = locations;
 
-  // Sport checkboxes
+  // Sport checkboxes (★ = "My Sports" favorite: checked by default on load)
+  const favSports = new Set(store.getJSON('asu-fav-sports') || []);
   const list = document.getElementById('sport-list');
   list.innerHTML = '';
   for (const sport of sports) {
     const color = sportColor(sport);
     const id = `sport-${sport.replace(/\W/g, '_')}`;
+    const isFav = favSports.has(sport);
     const label = document.createElement('label');
     label.setAttribute('for', id);
     label.innerHTML = `
       <input type="checkbox" id="${id}" value="${sport}" onchange="toggleSport(this)" />
       <span class="sport-color-dot" style="background:${color};"></span>
-      ${sport}
+      <span class="sport-name">${sport}</span>
+      <button type="button" class="sport-fav${isFav ? ' fav-on' : ''}" data-fav-sport="${sport}"
+        onclick="toggleFavSport(event, this)" title="My Sports: favorites are pre-selected on every visit"
+        aria-label="Favorite ${sport}">★</button>
     `;
     list.appendChild(label);
+    if (isFav) {
+      label.querySelector('input').checked = true;
+      label.classList.add('sport-active');
+      filters.sports.add(sport);
+    }
   }
 
   // Region dropdown — only show regions that have at least one event location
@@ -144,6 +154,8 @@ async function loadFilterOptions() {
   if (defaultSeason) {
     seasonSelect.value = defaultSeason;
     applySeason(defaultSeason);
+  } else if (filters.sports.size) {
+    applyFilters(); // favorites pre-checked but no season default to trigger a render
   }
 
   // Restore date range open/closed state
@@ -193,6 +205,22 @@ function toggleSport(checkbox) {
   const label = checkbox.closest('label');
   if (label) label.classList.toggle('sport-active', checkbox.checked);
   applyFilters();
+}
+
+// Star toggle inside the sport label: must not flip the checkbox it sits in.
+// Favorites only change which sports start checked on the next visit.
+function toggleFavSport(e, btn) {
+  e.preventDefault();
+  e.stopPropagation();
+  const sport = btn.dataset.favSport;
+  const favs = new Set(store.getJSON('asu-fav-sports') || []);
+  if (favs.has(sport)) favs.delete(sport);
+  else favs.add(sport);
+  store.setJSON('asu-fav-sports', [...favs]);
+  btn.classList.toggle('fav-on', favs.has(sport));
+  showToast(favs.has(sport)
+    ? `${sport} added to My Sports — selected by default from now on`
+    : `${sport} removed from My Sports`, 'success', 2500);
 }
 
 function toggleGameType(btn) {
@@ -470,7 +498,13 @@ function setView(view) {
   } else if (view === 'calendar') {
     calView.style.display = 'block';
     btnCal && btnCal.classList.add('active');
-    window.__calendar && window.__calendar.updateSize();
+    if (window.__calendar) {
+      window.__calendar.updateSize();
+      // Refetch like the other views re-render: filters changed while another
+      // view was active (e.g. My Sports pre-check at load) never reach the
+      // calendar otherwise — its initial fetch predates loadFilterOptions.
+      window.__calendar.refetchEvents();
+    }
   } else if (view === 'map') {
     mapView.style.display = 'block';
     btnMap && btnMap.classList.add('active');
