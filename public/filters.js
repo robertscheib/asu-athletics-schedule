@@ -392,8 +392,9 @@ function openEventModal(event) {
     actions += `<a class="modal-event-link" href="${href}" target="_blank" rel="noopener">Event page ↗</a>`;
   }
 
-  body.innerHTML = rows.join('') + actions;
+  body.innerHTML = rows.join('') + actions + '<div id="modal-h2h"></div>';
   document.getElementById('modal-overlay').classList.add('open');
+  if (window.loadH2hInto) window.loadH2hInto('modal-h2h', event.sport, event.title);
 }
 
 function row(icon, label, value) {

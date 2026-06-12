@@ -102,3 +102,18 @@ change a frontend file, bump its `?v=` AND bump `CACHE_NAME` in sw.js if index.h
   mode, TV/ticket links on list cards; phase 4 = ESPN team news strip + rosters. Full plan:
   ~/.claude/plans/review-the-dashboard-and-typed-otter.md. Pre-existing harmless 404 noticed:
   fullcalendar index.global.min.css doesn't exist on jsdelivr (v6 injects styles via JS).
+- [2026-06-12 (Claude Code)]: Roadmap phase 2 shipped: Scoring tab + head-to-head.
+  Game modal gets a "Scoring" tab (football uses ESPN's ready-made scoringPlays; baseball/
+  softball/basketball filter plays[] on scoringPlay===true; grouped by quarter/half/
+  "Top 1st" inning; ASU plays highlighted; generic "Play Result" type suppressed).
+  _gmBuildBoxScore now returns {tabs, panels} so tabs compose. New lib/h2h.js +
+  GET /api/h2h?sport=&opponent= computes W-L-T + last 5 meetings from the local DB;
+  opponent matching merges name variants under a canonical key ("Arizona Wildcats" 2025
+  rows + "Arizona" 2026 rows are the same school — feed eras differ!) with the
+  standings stop-word rules; opponent param also accepts full event titles.
+  H2H strip renders in the box-score modal (real ESPN oppTeam name), its fallback,
+  and the plain event modal (#modal-h2h, passes event.title). /api/h2h added to SW
+  NETWORK_FIRST (same cache-first-forever trap as /api/game). Bumps: game-modal v3,
+  filters v19, style v7, SW asu-cal-v8. Verified headless-chromium on :3100 (football
+  + baseball scoring tabs, both h2h strips) and prod after restart. Phase 3 next:
+  My Sports favorites, dark mode, TV/ticket links on list cards.
