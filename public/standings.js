@@ -43,15 +43,21 @@
     }
     const hasConf = data.entries.some(e => e.conf);
     const hasGB = data.entries.some(e => e.gamesBehind && e.gamesBehind !== '-');
-    const rows = data.entries.map((e, i) => `
-      <tr class="${e.isASU ? 'standings-asu-row' : ''}">
-        <td class="standings-pos">${i + 1}</td>
-        <td class="standings-team">${e.logo ? `<img src="${esc(e.logo)}" alt="" loading="lazy" />` : ''}${esc(e.name)}</td>
-        <td>${esc(hasConf ? (e.conf || '–') : (e.confPct || '–'))}</td>
-        <td>${esc(e.overall || '–')}</td>
-        ${hasGB ? `<td>${esc(e.gamesBehind || '–')}</td>` : ''}
-        <td>${esc(e.streak || '–')}</td>
-      </tr>`).join('');
+    const rows = data.entries.map((e, i) => {
+      const isTeamUA = isUA(e.name || '', e.logo);
+      const logoHtml = isTeamUA
+        ? `<span class="standings-team-emoji" title="University of Arizona" style="font-size:1.05rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;vertical-align:-25%;margin-right:7px;">💩</span>`
+        : (e.logo ? `<img src="${esc(e.logo)}" alt="" loading="lazy" />` : '');
+      return `
+        <tr class="${e.isASU ? 'standings-asu-row' : ''}">
+          <td class="standings-pos">${i + 1}</td>
+          <td class="standings-team">${logoHtml}${esc(e.name)}</td>
+          <td>${esc(hasConf ? (e.conf || '–') : (e.confPct || '–'))}</td>
+          <td>${esc(e.overall || '–')}</td>
+          ${hasGB ? `<td>${esc(e.gamesBehind || '–')}</td>` : ''}
+          <td>${esc(e.streak || '–')}</td>
+        </tr>`;
+    }).join('');
     const label = [
       data.seasonDisplayName ? `${data.seasonDisplayName}${data.isFinal ? ' (Final)' : ''}` : null,
       data.conference,

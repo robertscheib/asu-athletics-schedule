@@ -307,9 +307,11 @@ function _cardBellHtml(game) {
 
 function _cardMatchupHtml(game) {
   const asuLogoSvg = `<div class="live-card-asu-badge"><img src="/sparky.png" alt="ASU" style="width:32px;height:32px;object-fit:contain;" onerror="this.parentElement.textContent='🔱'"></div>`;
-  const oppLogoEl  = game.oppLogo
-    ? `<img class="live-card-logo" src="${esc(game.oppLogo)}" alt="${esc(game.oppName)}" loading="lazy" />`
-    : `<div class="live-card-logo-placeholder">${esc((game.oppAbbr || game.oppName).slice(0,3).toUpperCase())}</div>`;
+  const oppLogoEl  = isUA(game.oppName, game.oppLogo)
+    ? `<div class="live-card-logo-placeholder" title="University of Arizona" style="font-size:1.6rem;background:none;border-color:transparent;">💩</div>`
+    : (game.oppLogo
+      ? `<img class="live-card-logo" src="${esc(game.oppLogo)}" alt="${esc(game.oppName)}" loading="lazy" />`
+      : `<div class="live-card-logo-placeholder">${esc((game.oppAbbr || game.oppName).slice(0,3).toUpperCase())}</div>`);
 
   const asuScoreEl = game.state !== 'upcoming'
     ? `<div class="live-card-score${game.asuWinner ? ' score-winner' : ''}">${esc(game.asuScore)}</div>` : '';
@@ -657,9 +659,11 @@ function _renderNcaaTeamRow(team, isFinal, isLive) {
     : `<span class="ncaa-team-seed"></span>`;
 
   const logoUrl = team.logoUrl ? `https://www.ncaa.com${team.logoUrl}` : null;
-  const logoHtml = logoUrl
-    ? `<img class="ncaa-team-logo" src="${esc(logoUrl)}" alt="" loading="lazy">`
-    : `<span class="ncaa-team-abbr">${esc((team.name6Char || team.nameShort || 'TBD').slice(0, 6).toUpperCase())}</span>`;
+  const logoHtml = isUA(team.nameShort || team.name6Char || '', logoUrl)
+    ? `<span class="ncaa-team-logo" title="University of Arizona" style="font-size:0.95rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;">💩</span>`
+    : (logoUrl
+      ? `<img class="ncaa-team-logo" src="${esc(logoUrl)}" alt="" loading="lazy">`
+      : `<span class="ncaa-team-abbr">${esc((team.name6Char || team.nameShort || 'TBD').slice(0, 6).toUpperCase())}</span>`);
 
   const recordHtml = team.sectionRecord
     ? `<span class="ncaa-team-record">${esc(team.sectionRecord)}</span>` : '';
@@ -796,9 +800,11 @@ function renderBracketTeam(team, state) {
     ? `<span class="bracket-seed">${esc(team.seed)}</span>`
     : `<span class="bracket-seed"></span>`;
 
-  const logoHtml = team.logo
-    ? `<img class="bracket-team-logo" src="${esc(team.logo)}" alt="" loading="lazy">`
-    : `<span class="bracket-team-abbr">${esc((team.abbr || team.name || 'TBD').slice(0, 3).toUpperCase())}</span>`;
+  const logoHtml = isUA(team.name || team.abbr || '', team.logo)
+    ? `<span class="bracket-team-logo" title="University of Arizona" style="font-size:1.05rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;">💩</span>`
+    : (team.logo
+      ? `<img class="bracket-team-logo" src="${esc(team.logo)}" alt="" loading="lazy">`
+      : `<span class="bracket-team-abbr">${esc((team.abbr || team.name || 'TBD').slice(0, 3).toUpperCase())}</span>`);
 
   const scoreHtml = state !== 'pre' && team.score != null
     ? `<span class="bracket-team-score">${esc(team.score)}</span>` : '';
@@ -815,17 +821,23 @@ function renderBracketTeam(team, state) {
 
 function renderPoolStandings(tournament) {
   const colId = `ps-${tournament.id.replace(/[^a-z0-9]/gi, '-')}`;
-  const rows = (tournament.standings || []).map(s => `
-    <tr class="${s.isASU ? 'standings-asu-row' : ''}">
-      <td>${esc(s.rank)}</td>
-      <td>
-        ${s.logo ? `<img class="bracket-team-logo" src="${esc(s.logo)}" alt="" loading="lazy"> ` : ''}${esc(s.name)}
-      </td>
-      <td>${esc(s.w)}</td>
-      <td>${esc(s.l)}</td>
-      <td>${esc(s.pct)}</td>
-      <td>${esc(s.gb)}</td>
-    </tr>`).join('');
+  const rows = (tournament.standings || []).map(s => {
+    const isTeamUA = isUA(s.name || '', s.logo);
+    const logoHtml = isTeamUA
+      ? `<span class="bracket-team-logo" title="University of Arizona" style="font-size:1.05rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;">💩</span> `
+      : (s.logo ? `<img class="bracket-team-logo" src="${esc(s.logo)}" alt="" loading="lazy"> ` : '');
+    return `
+      <tr class="${s.isASU ? 'standings-asu-row' : ''}">
+        <td>${esc(s.rank)}</td>
+        <td>
+          ${logoHtml}${esc(s.name)}
+        </td>
+        <td>${esc(s.w)}</td>
+        <td>${esc(s.l)}</td>
+        <td>${esc(s.pct)}</td>
+        <td>${esc(s.gb)}</td>
+      </tr>`;
+  }).join('');
 
   const gamesHtml = (tournament.games || []).length
     ? `<div class="live-cards-grid" style="padding:12px 16px 16px">${tournament.games.map(renderGameCard).join('')}</div>` : '';
