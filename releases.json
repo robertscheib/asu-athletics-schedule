@@ -1,6 +1,22 @@
 {
   "releases": [
     {
+      "version": "1.2.0",
+      "date": "2026-06-12",
+      "title": "Standings, Dark Mode & More",
+      "features": [
+        "Conference standings on the Live tab — Big 12 (and NCHC hockey) tables with a sport picker",
+        "Ranked opponents now show poll badges (e.g. #6 Texas) in every view",
+        "Game modal: new Scoring tab with play-by-play scoring summaries",
+        "Head-to-head history vs each opponent — record and recent meetings in game details",
+        "My Sports: star your favorite sports and every visit starts filtered to them",
+        "Dark mode 🌙 — toggle in the header, or follows your device setting automatically",
+        "Buy tickets right from list cards on upcoming games",
+        "Sun Devils news headlines from ESPN on the Live tab",
+        "Team rosters for Football, Basketball, and Hockey from the standings widget"
+      ]
+    },
+    {
       "version": "1.1.4",
       "date": "2026-06-04",
       "title": "Granular Notification Options",
