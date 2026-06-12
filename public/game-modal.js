@@ -99,6 +99,10 @@ function _gmRenderStats(container, data, sport) {
 
   function teamLogoHtml(team) {
     const logo = team?.team?.logos?.[0]?.href || team?.team?.logo;
+    const name = team?.team?.displayName || team?.team?.name || '';
+    if (isUA(name, logo)) {
+      return `<div class="gm-team-logo-placeholder" title="University of Arizona" style="font-size:2.5rem;background:none;border-color:transparent;display:flex;align-items:center;justify-content:center;">💩</div>`;
+    }
     if (logo) return `<img class="gm-team-logo" src="${esc(logo)}" alt="" loading="lazy">`;
     return `<div class="gm-team-logo-placeholder">${esc((team?.team?.abbreviation || '???').slice(0,3).toUpperCase())}</div>`;
   }

@@ -109,8 +109,8 @@ function isUA(title, opponentLogo) {
   if (/^arizona\s+wildcats?/i.test(opponent)) return true;
   if (/^university\s+of\s+arizona/i.test(opponent)) return true;
 
-  // ESPN logo URL contains "arizona-wildcat"
-  if (opponentLogo && /arizona-wildcat/i.test(opponentLogo)) return true;
+  // ESPN logo URL contains "arizona-wildcat" or team ID 12
+  if (opponentLogo && (/arizona-wildcat/i.test(opponentLogo) || /\/500\/12\.png/i.test(opponentLogo))) return true;
 
   return false;
 }
