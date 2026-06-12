@@ -220,6 +220,12 @@ function listEventHTML(e) {
     ? window.bellIconHTML(e.id, true, undefined, e.sport)
     : '';
 
+  // stopPropagation keeps the row's modal click from firing on the link
+  const ticketHtml = isFuture && e.ticket_url
+    ? `<a class="list-ticket-link" href="${esc(e.ticket_url)}" target="_blank" rel="noopener"
+         onclick="event.stopPropagation()">🎟 ${esc(e.ticket_label || 'Tickets')}</a>`
+    : '';
+
   return `
     <div class="list-event-bar" style="background:${color}"></div>
     ${logoHTML}
@@ -235,8 +241,9 @@ function listEventHTML(e) {
       <div class="list-event-time">${time}</div>
       ${scoreHTML ? `<div>${scoreHTML}</div>` : ''}
       <div class="list-event-type">${capitalize(e.game_type || '')}${
-        e.tv_network ? ' · ' + e.tv_network : ''
+        e.tv_network ? ' · 📺 ' + e.tv_network : ''
       }</div>
+      ${ticketHtml}
       ${bellHtml}
     </div>
   `;
