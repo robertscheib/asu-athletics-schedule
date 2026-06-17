@@ -2,19 +2,56 @@
 
 ## Project Summary
 
-Self-hosted ASU Sun Devil Athletics schedule web app running at **asu.dikaiaserver.com** on the Ubuntu VM (10.10.1.19, port 3000). Pulls event data nightly from the official ASU feed and auto-inserts postseason/NCAA tournament games from ESPN. Serves a filterable calendar, list view, geocoded map, and live score feed. Node.js + Express backend with SQLite event cache and vanilla JS frontend.
+Self-hosted ASU Sun Devil Athletics schedule web app. **Production runs on the Oracle Cloud VPS** (`asu.dikaiaserver.com`); the **Ubuntu VM is now a dev sandbox** (`asu-dev.dikaiaserver.com`). Pulls event data nightly from the official ASU feed and auto-inserts postseason/NCAA tournament games from ESPN. Serves a filterable calendar, list view, geocoded map, and live score feed. Node.js + Express backend with SQLite event cache and vanilla JS frontend.
 
 ## Environment
 
-- **Host**: Ubuntu VM at 10.10.1.19, port 3000
+Two-box topology (migrated 2026-06-16): **prod = Oracle VPS** (resilient, off-home),
+**dev = Ubuntu VM** (fast iteration, may break). Promote mature work to prod by cutting a
+git tag (see `## Deploy / Promotion` below). Both run the same code; the scheduler
+(nightly fetch + push notifications) runs **only on prod** to avoid duplicate fetches/pushes.
+
+### Prod — Oracle Cloud VPS (`asu.dikaiaserver.com`)
+- **Host**: Oracle `speedtest-wan`, `ubuntu@170.9.227.11` (Ubuntu 24.04, arm64, 4 OCPU/24 GB), TZ America/Chicago
+- **Project root**: `/home/ubuntu/projects/asu-athletics-schedule/`
+- **Secrets** (single file, consolidated — Oracle has no unifi-scripts fallback):
+  `/home/ubuntu/projects/secrets.env` (chmod 600) holds CF_API_TOKEN, CF_ACCOUNT_ID,
+  VAPID_* and others; loaded by systemd `EnvironmentFile=`. The `lib/env.js` fallback to
+  `unifi-scripts/secrets.env` is a no-op here (VAPID already in env).
+- **Service**: `asu-cal.service` (User=ubuntu, ExecStart=`/usr/bin/node server.js`) — runs the scheduler
+- **Public path**: dedicated `cloudflared` tunnel **on the box** (`asu-oracle`, id `56683813-ed64-4029-a2d1-fe03a96b8ebc`) → `localhost:3000`. systemd `cloudflared.service`. asu CNAME → `<that-id>.cfargotunnel.com`. **No home dependency.** Rollback: repoint asu CNAME to the HA tunnel `ea5427e8-…cfargotunnel.com` (its asu→NPM ingress is kept as a fallback).
+
+### Dev — Ubuntu VM (`asu-dev.dikaiaserver.com`, CF Access-gated)
+- **Host**: Ubuntu VM at 10.10.1.19, port 3000 (Claude Code runs here)
 - **Project root**: `~/projects/asu-athletics-schedule/`
-- **Secrets** (two files, both load-bearing — do not consolidate without an ops change):
+- **Secrets** (two files, both load-bearing here — do not consolidate without an ops change):
   - `~/projects/secrets.env` — CF_API_TOKEN / CF_ACCOUNT_ID; loaded by systemd (`EnvironmentFile=` in asu-cal.service)
   - `~/projects/unifi-scripts/secrets.env` — VAPID_* push keys; loaded as a fallback by `lib/env.js`
-- **DB**: `events.db` (SQLite, gitignored)
-- **Service**: `asu-cal.service` systemd unit
-- **Live URL**: https://asu.dikaiaserver.com
+- **Service**: `asu-cal.service` — with drop-in `/etc/systemd/system/asu-cal.service.d/dev-no-scheduler.conf` setting `DISABLE_SCHEDULER=1` (NO cron, NO pushes). Refresh test data manually.
+- **Public path**: HA-add-on tunnel (`jarvis_tunnel_cf`) → NPM (10.10.1.40:80) → 10.10.1.19:3000, NPM proxy host id 25, behind CF Access (Allow Robert / Google OAuth).
+
+### Shared
+- **DB**: `events.db` (SQLite, gitignored). Prod seeded by copying dev's DB (push subscribers preserved). `GeoLite2-City.mmdb` (64 MB, gitignored) copied to prod too.
 - **Verification knobs**: `PORT=3100 DISABLE_SCHEDULER=1 node server.js` runs a second instance against the live DB without cron jobs / double-pushes (never hit `/api/refresh` or `/api/geocode` on it)
+- **Rule**: never run the scheduler / `/api/refresh` / `/api/geocode` on both boxes at once — only prod owns the scheduler; dev is `DISABLE_SCHEDULER=1`.
+
+## Deploy / Promotion (dev → prod)
+
+Production is gated by **git tags**. Develop and commit freely on `main` from the Ubuntu
+dev box; when a feature is mature, cut a release tag, then deploy that tag on Oracle:
+
+```bash
+# on dev (Ubuntu), after bumping package.json + releases.json for the release:
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+
+# on prod (Oracle), ssh ubuntu@170.9.227.11:
+cd ~/projects/asu-athletics-schedule
+git fetch --tags && git checkout vX.Y.Z && npm ci && sudo systemctl restart asu-cal
+```
+
+> SSH note: the Oracle box silently drops port 22 after a burst of rapid SSH connections
+> (sshd MaxStartups throttle — no fail2ban installed). Batch remote work into few sessions;
+> if locked out, wait ~2–10 min. The public site is unaffected (tunnel is outbound).
 
 ## Project Structure
 
@@ -170,4 +207,29 @@ change a frontend file, bump its `?v=` AND bump `CACHE_NAME` in sw.js if index.h
   Live gets full width and other views are untouched. Bumps: filters v21, style v10,
   SW asu-cal-v12. Verified headless on :3100 (desktop + 390px mobile, both
   directions of the toggle) and prod after restart.
+- [2026-06-16 (Claude Code)]: **MIGRATED PROD TO ORACLE VPS; Ubuntu VM is now the dev
+  sandbox.** Motivation: resilience — old prod depended on home internet + HA tunnel + NPM
+  + the Ubuntu VM. New topology (full details in `## Environment` + `## Deploy / Promotion`):
+  * **Prod = Oracle** `ubuntu@170.9.227.11` at `/home/ubuntu/projects/asu-athletics-schedule`,
+    Node 24 + build-essential (better-sqlite3 compiled for arm64), TZ America/Chicago,
+    single consolidated `secrets.env`, `events.db` + `GeoLite2-City.mmdb` scp'd from dev
+    (push subscribers preserved). `asu-cal.service` runs the scheduler.
+  * **Dedicated `cloudflared` on Oracle** (tunnel `asu-oracle`, id
+    `56683813-ed64-4029-a2d1-fe03a96b8ebc`, remotely-managed, ingress asu→localhost:3000).
+    Cutover = repointed `asu` CNAME from HA tunnel `ea5427e8-…` → the new tunnel. Verified
+    served by Oracle (stop-app→502, start→200; homepage/events/ics/sw all 200). HA tunnel's
+    asu→NPM ingress + NPM host 12 LEFT as rollback fallback.
+  * **Dev = Ubuntu** scheduler disabled via drop-in
+    `/etc/systemd/system/asu-cal.service.d/dev-no-scheduler.conf` (`DISABLE_SCHEDULER=1`) so
+    only prod fetches/pushes. Exposed at `asu-dev.dikaiaserver.com`: HA tunnel ingress
+    asu-dev→NPM, NPM proxy host id 25 → 10.10.1.19:3000 (clone of host 12), CF Access app
+    "ASU Dev (sandbox)" id `d9cf31c3-06b8-4b92-80ee-4020ffc9be2b` + Allow Robert policy,
+    DNS CNAME asu-dev→HA tunnel. Verified 302→cloudflareaccess login (gated).
+  * **Promotion = git tags.** Created+pushed the first deploy tag `v1.2.0` at main HEAD
+    (ba9a06b) — tagging had lapsed after v1.0.9. Deploy a tag on Oracle with
+    `git fetch --tags && git checkout vX.Y.Z && npm ci && sudo systemctl restart asu-cal`.
+  * Caveat: Oracle sshd silently drops port 22 after rapid SSH bursts (MaxStartups; no
+    fail2ban) — batch SSH, wait it out if locked. Public site is unaffected.
+  * NOT yet verified (needs Robert on a real device): authenticated `asu-dev` page render,
+    PWA install/push on prod from a phone, and a full reboot-recovery test of the Oracle box.
 
