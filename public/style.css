@@ -651,6 +651,10 @@ main {
   flex: 1;
   display: none;
   position: relative;
+  /* Trap Leaflet's internal z-indexes (tiles 200, markers 600, controls 1000)
+     inside the map's own stacking context — without this the map painted over
+     the mobile filter drawer, and could do the same to modals/toasts. */
+  isolation: isolate;
 }
 
 .map-pin {

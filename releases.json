@@ -1,6 +1,14 @@
 {
   "releases": [
     {
+      "version": "1.3.1",
+      "date": "2026-07-02",
+      "title": "Bug Fixes",
+      "features": [
+        "Map tab: the filter panel no longer hides behind the map on mobile"
+      ]
+    },
+    {
       "version": "1.3.0",
       "date": "2026-07-02",
       "title": "Faster, Tougher, Mobile-Friendly",
