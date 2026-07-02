@@ -156,11 +156,16 @@ Mobile addendum (Robert-reported): filter sidebar → fixed bottom sheet (was re
 a 100vh main = unreachable); header now fits 320–430px off-Live (wordmark + 📅 hidden ≤767px,
 📅 lives in the sheet, clamp() sizing, overflow-x clip guard). Playwright-verified across
 widths + desktop regression. style.css→v12, filters.js→v24, CACHE_NAME→v17.
-**ALL SIX AUDIT GROUPS + mobile addendum COMPLETE — committed as v1.3.0 bump (2026-07-02,
-tag NOT cut yet).** Before cutting the v1.3.0 tag + prod deploy: real-device pass on
-Robert's phone (Safari tab, installed-PWA v13→v17 SW update, filter sheet feel, push test);
-prod ADMIN_TOKEN into Oracle secrets.env (no TRUST_PROXY_HOPS there; verify VAPID present);
-watch a live-game day on dev.
+**v1.3.0 SHIPPED TO PROD 2026-07-02** — tag pushed, deployed on Oracle (`git checkout
+v1.3.0 && npm ci && restart`), verified from the public edge: /api/version 1.3.0, admin
+401 (ADMIN_TOKEN was already in Oracle secrets.env), VAPID present, no TRUST_PROXY_HOPS
+(default 1 correct), /api/live 0.23s, SW v18 serving, per-IP rate-limit headers live.
+Startup geocode pass healed prod's own backlog (KNOWN_VENUES pins ran on boot).
+
+**Open after ship:** real-device pass on Robert's phone against PROD (drawer feel,
+installed-PWA v13→v18 update, push test via test-push.js); watch the first live-game day
+(Soccer opens Aug 5) for the new live-cache path; consider audit "Feature ideas" pool in
+docs/audit-2026-07-01.md for the next cycle.
 
 **Infra incident (2026-07-02, resolved):** Robert saw the new UI on the *prod* URL but not
 asu-dev — root cause was the split-DNS leftover documented in `## Environment` above (LAN →
