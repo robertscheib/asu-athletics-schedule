@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asu-cal-v13';
+const CACHE_NAME = 'asu-cal-v17';
 const OFFLINE_CHANNEL = 'asu-offline';
 
 // JS and CSS files are loaded with versioned query params (e.g. live.js?v=22).
@@ -21,8 +21,9 @@ const CDN_ORIGINS = [
   'fonts.gstatic.com',
 ];
 
-const NETWORK_FIRST_PATHS = ['/api/events', '/api/sports', '/api/locations', '/api/standings', '/api/h2h', '/api/news', '/api/roster'];
-
+// Every /api/ GET not listed here is network-first (cached copy only as an
+// offline fallback). APIs must NEVER be cache-first: that froze /api/seasons,
+// /api/releases, etc. at their first response until a CACHE_NAME bump.
 const NETWORK_ONLY_PATHS = [
   '/api/live',
   '/api/game',
@@ -30,7 +31,14 @@ const NETWORK_ONLY_PATHS = [
   '/api/geocode',
   '/api/subscribe',
   '/api/unsubscribe',
+  '/api/admin',   // auth'd + must never be served stale from cache
+  '/admin/',      // admin portal page: unversioned HTML, online-only tool
+  '/stats',       // stats page + /stats.html: same
 ];
+
+// APIs whose responses are JSON arrays — the offline fallback shape must
+// match or callers like fetchEvents() throw on `.filter` while offline.
+const ARRAY_APIS = new Set(['/api/events', '/api/sports', '/api/locations', '/api/seasons']);
 
 // ── Install: pre-cache shell ──────────────────────────────────────────────────
 
@@ -62,13 +70,13 @@ self.addEventListener('fetch', event => {
   // Network-only paths
   if (NETWORK_ONLY_PATHS.some(p => url.pathname.startsWith(p))) return;
 
-  // Network-first: API data endpoints
-  if (NETWORK_FIRST_PATHS.some(p => url.pathname.startsWith(p))) {
+  // All other API GETs: network-first, cached copy only as offline fallback
+  if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirstWithFallback(request));
     return;
   }
 
-  // Cache-first: shell + CDN
+  // Cache-first: shell (versioned ?v= assets) + CDN
   if (url.origin === self.location.origin || CDN_ORIGINS.includes(url.hostname)) {
     event.respondWith(cacheFirst(request));
     return;
@@ -105,12 +113,15 @@ async function networkFirstWithFallback(request) {
   } catch {
     clearTimeout(timer);
     const cached = await caches.match(request);
-    if (cached) {
-      _notifyOffline();
-      return cached;
-    }
     _notifyOffline();
-    return new Response(JSON.stringify({ offline: true, events: [] }), {
+    if (cached) return cached;
+    // Nothing cached: array endpoints get an empty array (callers .filter/.map
+    // the body without checking status); everything else gets a JSON 503.
+    if (ARRAY_APIS.has(new URL(request.url).pathname)) {
+      return new Response('[]', { headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ offline: true }), {
+      status: 503,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -132,12 +143,28 @@ self.addEventListener('push', event => {
 
   const n = data.notification || {};
   const title = n.title || 'ASU Sun Devil Athletics';
+
+  // Game-start payloads carry startTime as a raw epoch (seconds) so the time
+  // renders in the DEVICE's local timezone — the server's TZ is meaningless
+  // to a traveling user. Computed here at display time, so the lead minutes
+  // are exact. Old payloads without startTime just show n.body unchanged.
+  let body = n.body || '';
+  if (data.startTime) {
+    const t = new Date(data.startTime * 1000);
+    const timeStr = t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const mins = Math.round((t.getTime() - Date.now()) / 60000);
+    const lead = mins > 0 ? `Starts in ${mins} min (${timeStr})` : `Started at ${timeStr}`;
+    body = [lead, body].filter(Boolean).join(' · ');
+  }
+
   const options = {
-    body:    n.body || '',
+    body,
     icon:    n.icon || '/icons/icon-192.png',
     badge:   '/icons/icon-192.png',
     data:    { navigate: n.navigate || '/' },
-    tag:     'asu-game-alert',
+    // Per-game tags from the server let score updates replace each other;
+    // the constant fallback keeps old payload shapes working.
+    tag:     n.tag || 'asu-game-alert',
   };
 
   event.waitUntil(self.registration.showNotification(title, options));

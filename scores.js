@@ -4,6 +4,7 @@ const { opponentFromTitle } = require('./lib/opponent');
 const { USER_AGENT } = require('./lib/constants');
 const { SPORT_CONFIG, ALL_LIVE_CONFIGS, TOURNAMENT_RE } = require('./lib/sports-config');
 const { buildTournaments, detectActiveTournaments } = require('./lib/tournaments');
+const { TtlCache } = require('./lib/cache');
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 
@@ -63,15 +64,20 @@ function opponentMatches(dbOpp, espnDisplay, espnAbbr) {
 }
 
 function findDBMatch(scoreData, dbEvents, espnDate) {
+  // Strongest signal first: an espn_{id} row from a previous sync/auto-insert
+  // is this exact game regardless of date shifts (reschedules, TBD times).
+  if (scoreData.espnEventId) {
+    const byEspnId = dbEvents.find(db => db.id === `espn_${scoreData.espnEventId}`);
+    if (byEspnId) return byEspnId;
+  }
+
   const espnDay = espnDate.toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
 
   const sameDay = dbEvents.filter(db => {
     const dbDay = new Date(db.start_date * 1000).toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
     return dbDay === espnDay;
   });
-
   if (sameDay.length === 0) return null;
-  if (sameDay.length === 1) return sameDay[0];
 
   const withOpp = sameDay.filter(db => {
     const dbOpp = opponentFromTitle(db.title, { lowercase: true });
@@ -79,10 +85,24 @@ function findDBMatch(scoreData, dbEvents, espnDate) {
   });
   if (withOpp.length === 1) return withOpp[0];
 
-  // Fallback: match by espn_{id} record created from a previous scoreboard sync
-  if (scoreData.espnEventId) {
-    const byEspnId = dbEvents.find(db => db.id === `espn_${scoreData.espnEventId}`);
-    if (byEspnId) return byEspnId;
+  // Doubleheader: two same-day games vs the same opponent — take the one
+  // whose start time is closest to ESPN's. If the feed left both on the
+  // midnight placeholder they're indistinguishable; return null so the game
+  // auto-inserts rather than risking writing game 2's score onto game 1.
+  if (withOpp.length > 1) {
+    const ts = Math.floor(espnDate.getTime() / 1000);
+    const sorted = [...withOpp].sort((a, b) => Math.abs(a.start_date - ts) - Math.abs(b.start_date - ts));
+    if (Math.abs(sorted[0].start_date - ts) !== Math.abs(sorted[1].start_date - ts)) return sorted[0];
+    return null;
+  }
+
+  // No opponent-confirmed candidate. A lone same-day event is only trusted
+  // when its opponent can't be parsed at all (legacy title shapes) — if it
+  // parses to a DIFFERENT opponent, this is a different game (e.g. an ESPN
+  // tournament game the feed never had) and matching it would write the
+  // wrong score onto it.
+  if (sameDay.length === 1 && opponentFromTitle(sameDay[0].title, { lowercase: true }) == null) {
+    return sameDay[0];
   }
 
   return null;
@@ -233,6 +253,7 @@ function _isRelevantGame(espnEvent, comp) {
 function _syncCompletedGame(espnEvent, dbEvents) {
   const scoreData = extractScore(espnEvent);
   if (!scoreData) return;
+  scoreData.espnEventId = espnEvent.id; // enables the exact espn_{id} match
   const dbMatch = findDBMatch(scoreData, dbEvents, new Date(espnEvent.date));
   if (!dbMatch) return;
   if (dbMatch.result !== scoreData.result ||
@@ -339,17 +360,41 @@ function _autoInsertEspnGame(cfg, espnEvent, comp, asuComp, game) {
   }
 }
 
+// /api/live is the hot 30s polling path: cache the full result briefly and
+// single-flight concurrent misses so N clients cost one ESPN sweep, and fetch
+// all sport scoreboards in parallel so latency is the slowest fetch, not the
+// sum (a couple of slow ESPN responses used to stack sequentially).
+const LIVE_CACHE_TTL = 15_000;
+const _liveCache = new TtlCache();
+let _liveInflight = null;
+
 async function fetchLiveGames() {
+  const hit = _liveCache.get('live');
+  if (hit !== undefined) return hit;
+  if (_liveInflight) return _liveInflight;
+  _liveInflight = _fetchLiveGamesUncached()
+    .then(result => {
+      _liveCache.set('live', result, LIVE_CACHE_TTL);
+      return result;
+    })
+    .finally(() => { _liveInflight = null; });
+  return _liveInflight;
+}
+
+async function _fetchLiveGamesUncached() {
   const games = [];
 
-  for (const cfg of ALL_LIVE_CONFIGS) {
-    let scoreboard;
-    try {
-      scoreboard = await fetchLiveScoreboard(cfg.espnPath);
-    } catch (err) {
-      console.error(`[live] ${cfg.dbSport}: scoreboard fetch failed:`, err.message);
+  const boards = await Promise.allSettled(
+    ALL_LIVE_CONFIGS.map(cfg => fetchLiveScoreboard(cfg.espnPath)),
+  );
+
+  for (let i = 0; i < ALL_LIVE_CONFIGS.length; i++) {
+    const cfg = ALL_LIVE_CONFIGS[i];
+    if (boards[i].status === 'rejected') {
+      console.error(`[live] ${cfg.dbSport}: scoreboard fetch failed:`, boards[i].reason?.message);
       continue;
     }
+    const scoreboard = boards[i].value;
 
     const dbEvents = queryEvents({ sport: cfg.dbSport });
 
@@ -483,6 +528,7 @@ async function fetchAndStoreLiveScores() {
 
       const scoreData = extractScore(espnEvent);
       if (!scoreData) continue;
+      scoreData.espnEventId = espnEvent.id;
 
       const dbMatch = findDBMatch(scoreData, dbEvents, new Date(espnEvent.date));
       if (!dbMatch) continue;
@@ -530,6 +576,7 @@ async function fetchAndStoreScores() {
     for (const espnEvent of completed) {
       const scoreData = extractScore(espnEvent);
       if (!scoreData) continue;
+      scoreData.espnEventId = espnEvent.id;
 
       const espnDate = new Date(espnEvent.date);
       const dbMatch = findDBMatch(scoreData, dbEvents, espnDate);
@@ -551,4 +598,5 @@ async function fetchAndStoreScores() {
   return { updated, inserted };
 }
 
-module.exports = { fetchAndStoreScores, fetchAndStoreLiveScores, fetchLiveGames };
+// findDBMatch exported for tests only — not used by other modules.
+module.exports = { fetchAndStoreScores, fetchAndStoreLiveScores, fetchLiveGames, findDBMatch };

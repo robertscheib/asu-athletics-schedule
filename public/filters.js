@@ -9,16 +9,10 @@ const filters = {
   to: '',
 };
 
-const REGIONS = {
-  'Southwest':         ['Arizona', 'New Mexico', 'Texas', 'Oklahoma'],
-  'West':              ['California', 'Nevada', 'Utah', 'Colorado'],
-  'Pacific Northwest': ['Washington', 'Oregon', 'Idaho'],
-  'Midwest':           ['Illinois', 'Ohio', 'Indiana', 'Michigan', 'Wisconsin', 'Minnesota', 'Iowa', 'Missouri', 'Kansas', 'Nebraska', 'North Dakota', 'South Dakota'],
-  'Southeast':         ['Florida', 'Georgia', 'Alabama', 'Mississippi', 'Tennessee', 'South Carolina', 'North Carolina', 'Virginia', 'Kentucky', 'Arkansas', 'Louisiana'],
-  'Northeast':         ['New York', 'Pennsylvania', 'New Jersey', 'Connecticut', 'Massachusetts', 'Rhode Island', 'Vermont', 'New Hampshire', 'Maine', 'Maryland', 'Delaware', 'District of Columbia', 'West Virginia'],
-  'Mountain':          ['Montana', 'Wyoming', 'Idaho'],
-  'Hawaii/Alaska':     ['Hawaii', 'Alaska'],
-};
+// Region→states table comes from the server (/api/regions, single source in
+// db.js) — the local copy here had drifted from the backend's. Populated by
+// loadFilterOptions; empty until then, which degrades to "All Regions" only.
+let REGIONS = {};
 
 let allLocations = [];
 
@@ -34,18 +28,21 @@ function eventLogoHTML(event) {
               style="font-size:1.4rem;background:none;border-color:transparent;">💩</div>`;
   }
 
+  // Title goes inside a JS string inside an HTML attribute: JS-escape the
+  // quotes/backslashes first, THEN HTML-escape (the browser decodes the
+  // attribute before the JS engine parses the handler).
+  const safeTitle = esc((event.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+
   // 2. Feed-provided logo
   if (event.opponent_logo) {
-    const safeTitle = (event.title || '').replace(/'/g, "\\'");
-    return `<img class="list-event-logo" src="${event.opponent_logo}" alt="" loading="lazy"
+    return `<img class="list-event-logo" src="${esc(event.opponent_logo)}" alt="" loading="lazy"
              onerror="this.replaceWith(makeLogoPlaceholder('${safeTitle}','${color}'))">`;
   }
 
   // 3. ESPN CDN fallback by name
   const espnUrl = espnLogoUrl(event.title);
   if (espnUrl) {
-    const safeTitle = (event.title || '').replace(/'/g, "\\'");
-    return `<img class="list-event-logo" src="${espnUrl}" alt="" loading="lazy"
+    return `<img class="list-event-logo" src="${esc(espnUrl)}" alt="" loading="lazy"
              onerror="this.replaceWith(makeLogoPlaceholder('${safeTitle}','${color}'))">`;
   }
 
@@ -81,13 +78,38 @@ function showToast(message, type = 'success', duration = 3500) {
   }, duration);
 }
 
+// Wrapper: a failed fetch used to reject silently inside DOMContentLoaded and
+// leave the sidebar stuck on "Loading…" with no feedback and no retry.
 async function loadFilterOptions() {
-  const [sports, locations, seasons, allEvents] = await Promise.all([
+  try {
+    await _loadFilterOptionsInner();
+  } catch (err) {
+    console.error('[filters] loadFilterOptions failed:', err);
+    const list = document.getElementById('sport-list');
+    if (list) {
+      list.innerHTML = '<em style="font-size:0.8rem;color:#c0392b">Couldn\'t load filters — <a href="#" onclick="loadFilterOptions();return false;">retry</a></em>';
+    }
+    if (typeof showToast === 'function') showToast('Failed to load filter options', 'error');
+  }
+}
+
+async function _loadFilterOptionsInner() {
+  const [sports, locations, seasons, defaultSeasonData, regions] = await Promise.all([
     fetch('/api/sports').then(r => r.json()),
     fetch('/api/locations').then(r => r.json()),
     fetch('/api/seasons').then(r => r.json()),
-    fetch('/api/events').then(r => r.json()),
+    // Server-side default (was: fetch EVERY event just to derive this).
+    fetch('/api/seasons/default').then(r => r.json()).catch(() => ({})),
+    fetch('/api/regions').then(r => r.json()).catch(() => ({})),
   ]);
+
+  // Accept only the expected shape (the SW offline fallback returns
+  // { offline: true } — Object.entries of that would render junk regions).
+  if (regions && typeof regions === 'object') {
+    REGIONS = Object.fromEntries(
+      Object.entries(regions).filter(([, states]) => Array.isArray(states)),
+    );
+  }
 
   allLocations = locations;
 
@@ -141,16 +163,11 @@ async function loadFilterOptions() {
     seasonSelect.appendChild(opt);
   });
 
-  // Auto-select most recent season with completed games; fall back to most recent season available
-  const seasonsWithResults = [...new Set(allEvents.filter(e => e.result).map(e => e.season).filter(Boolean))];
-
-  let defaultSeason = null;
-  if (seasonsWithResults.length) {
-    defaultSeason = seasonsWithResults.sort().pop();
-  } else if (seasons.length) {
-    // Off-season / new season: no results yet — pick the most recent season.
-    defaultSeason = seasons[0]; // seasons array is ORDER BY season DESC
-  }
+  // Auto-select most recent season with completed games (computed server-side);
+  // fall back to most recent season available (array is ORDER BY season DESC).
+  const defaultSeason =
+    (defaultSeasonData && typeof defaultSeasonData.season === 'string' && defaultSeasonData.season)
+    || (seasons.length ? seasons[0] : null);
   if (defaultSeason) {
     seasonSelect.value = defaultSeason;
     applySeason(defaultSeason);
@@ -370,13 +387,15 @@ function openEventModal(event) {
   const rows = [];
 
   // liveGame already checked above for ESPN intercept; re-read for LIVE badge in existing modal
+  // row() values land in innerHTML — everything upstream-controlled (feed /
+  // ESPN strings) must pass through esc().
   const liveGameBadge = window.__liveData?.[event.id];
   if (liveGameBadge) {
-    rows.push(row('🔴', 'Live', `<span class="live-badge-modal">LIVE</span> <strong>${liveGameBadge.asuScore}–${liveGameBadge.oppScore}</strong> <span class="live-situation">${liveGameBadge.situation}</span>`));
+    rows.push(row('🔴', 'Live', `<span class="live-badge-modal">LIVE</span> <strong>${esc(liveGameBadge.asuScore)}–${esc(liveGameBadge.oppScore)}</strong> <span class="live-situation">${esc(liveGameBadge.situation)}</span>`));
   } else if (event.result) {
     const scoreClass = event.result === 'W' ? 'score-w' : event.result === 'L' ? 'score-l' : 'score-t';
     const label = event.result === 'W' ? 'Win' : event.result === 'L' ? 'Loss' : 'Tie';
-    rows.push(row('🏆', 'Result', `<span class="score-badge ${scoreClass}">${event.result} ${event.asu_score}–${event.opp_score}</span> <span style="color:var(--text-muted);font-size:0.8rem">${label}</span>`));
+    rows.push(row('🏆', 'Result', `<span class="score-badge ${scoreClass}">${esc(event.result)} ${esc(event.asu_score)}–${esc(event.opp_score)}</span> <span style="color:var(--text-muted);font-size:0.8rem">${label}</span>`));
   }
 
   const endStr = event.end_date && event.end_date !== event.start_date ? formatTs(event.end_date) : '';
@@ -384,25 +403,25 @@ function openEventModal(event) {
 
   if (event.location_name || event.venue_address) {
     const cleanAddr = cleanDisplayAddress(event.venue_address);
-    rows.push(row('📍', 'Venue', [event.location_name, cleanAddr].filter(Boolean).join('<br/>')));
+    rows.push(row('📍', 'Venue', [esc(event.location_name), esc(cleanAddr)].filter(Boolean).join('<br/>')));
   }
   if (event.city || event.state) {
-    rows.push(row('🏙️', 'Location', [event.city, event.state].filter(Boolean).join(', ')));
+    rows.push(row('🏙️', 'Location', esc([event.city, event.state].filter(Boolean).join(', '))));
   }
   if (event.opp_rank) {
-    rows.push(row('🏅', 'Opponent', `<span class="rank-badge">#${event.opp_rank}</span> in latest poll`));
+    rows.push(row('🏅', 'Opponent', `<span class="rank-badge">#${esc(event.opp_rank)}</span> in latest poll`));
   }
   if (event.game_type) {
-    rows.push(row('🏟️', 'Type', capitalize(event.game_type)));
+    rows.push(row('🏟️', 'Type', esc(capitalize(event.game_type))));
   }
   if (event.tv_network) {
-    rows.push(row('📺', 'TV', event.tv_network));
+    rows.push(row('📺', 'TV', esc(event.tv_network)));
   }
   if (event.season) {
-    rows.push(row('📆', 'Season', event.season));
+    rows.push(row('📆', 'Season', esc(event.season)));
   }
   if (event.badges) {
-    const badges = event.badges.split('|').filter(Boolean).map(b => `<span class="badge">${b.trim()}</span>`).join(' ');
+    const badges = event.badges.split('|').filter(Boolean).map(b => `<span class="badge">${esc(b.trim())}</span>`).join(' ');
     rows.push(row('⭐', 'Promotions', badges));
   }
 
@@ -412,18 +431,27 @@ function openEventModal(event) {
   if (isFuture && typeof window.bellIconHTML === 'function') {
     actions += `<div class="modal-bell-row">${window.bellIconHTML(event.id, true, undefined, event.sport)}<span class="modal-bell-label">Get game alerts</span></div>`;
   }
-  if (event.ticket_url) {
-    actions += `<a class="modal-ticket-btn" href="${event.ticket_url}" target="_blank" rel="noopener">${event.ticket_label || 'Get Tickets'}</a>`;
+  // Feed URLs: escape, and only link http(s) (blocks javascript: from a
+  // compromised feed).
+  if (event.ticket_url && /^https?:\/\//i.test(event.ticket_url)) {
+    actions += `<a class="modal-ticket-btn" href="${esc(event.ticket_url)}" target="_blank" rel="noopener">${esc(event.ticket_label || 'Get Tickets')}</a>`;
   }
   if (event.node_url) {
     const href = event.node_url.startsWith('http') ? event.node_url : `https://sundevils.com${event.node_url}`;
-    actions += `<a class="modal-event-link" href="${href}" target="_blank" rel="noopener">Event page ↗</a>`;
+    if (/^https?:\/\//i.test(href)) {
+      actions += `<a class="modal-event-link" href="${esc(href)}" target="_blank" rel="noopener">Event page ↗</a>`;
+    }
   }
 
   body.innerHTML = rows.join('') + actions + '<div id="modal-h2h"></div>';
   document.getElementById('modal-overlay').classList.add('open');
+  // Basic dialog a11y: move focus in, restore on close (see closeModalDirect).
+  _modalPrevFocus = document.activeElement;
+  document.querySelector('#modal .modal-close')?.focus();
   if (window.loadH2hInto) window.loadH2hInto('modal-h2h', event.sport, event.title);
 }
+
+let _modalPrevFocus = null;
 
 function row(icon, label, value) {
   return `<div class="modal-row"><span class="modal-row-icon">${icon}</span><span class="modal-row-label">${label}</span><span class="modal-row-value">${value}</span></div>`;
@@ -436,10 +464,21 @@ function closeModal(e) {
 }
 
 function closeModalDirect() {
-  document.getElementById('modal-overlay').classList.remove('open');
+  const overlay = document.getElementById('modal-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  if (wasOpen && _modalPrevFocus?.focus) {
+    _modalPrevFocus.focus();
+    _modalPrevFocus = null;
+  }
 }
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalDirect(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closeModalDirect();
+  // Also close the mobile filter sheet if it's open
+  if (document.getElementById('sidebar')?.classList.contains('open')) toggleFilters();
+});
 
 // ── Refresh ────────────────────────────────────────────
 
@@ -468,8 +507,11 @@ async function triggerRefresh() {
 function toggleFilters() {
   const sidebar = document.getElementById('sidebar');
   const btn = document.getElementById('btn-filters');
+  const backdrop = document.getElementById('sidebar-backdrop');
   const isOpen = sidebar.classList.toggle('open');
   btn.classList.toggle('active', isOpen);
+  btn.setAttribute('aria-expanded', String(isOpen));
+  if (backdrop) backdrop.classList.toggle('open', isOpen);
 }
 
 // ── View toggle ────────────────────────────────────────
@@ -492,7 +534,11 @@ function setView(view) {
   [btnLive, btnCal, btnList, btnMap].forEach(b => b && b.classList.remove('active'));
 
   // Live is ESPN-scoreboard-driven and ignores the filters — hide the
-  // sidebar (and its mobile toggle) there entirely.
+  // sidebar (and its mobile toggle) there entirely. Close the mobile filter
+  // sheet first or it (and its backdrop) would linger over the Live tab.
+  if (view === 'live' && document.getElementById('sidebar')?.classList.contains('open')) {
+    toggleFilters();
+  }
   document.body.classList.toggle('live-active', view === 'live');
 
   if (view === 'live') {

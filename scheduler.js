@@ -7,27 +7,31 @@ const push = require('./push');
 
 // ── Cron job schedule ──────────────────────────────────────────────────────────
 //
-//  */2  8-23  * * *  Background score poller            (Phase 3)
+//  Game-hour jobs run 8:00–01:58 server time (America/Chicago). Phoenix is
+//  1–2 h behind Chicago, so late tips (9–10 pm MST) end after midnight CT —
+//  the 0-1 range covers those; games never straddle 2:00–7:59 CT.
+//
+//  */2  0-1,8-23  * * *  Background score poller
 //    → Calls ESPN directly, writes game_status + scores to DB
 //    → Only runs when subscribed games are in active windows
-//    → Does NOT send pushes
+//    → Sends score_update pushes for subscribed live games
 //
-//  */3  8-23  * * *  Final score push trigger            (Phase 2)
-//    → Reads DB for game_status = 'post' + final_push_sent = 0
-//    → Calls sendGameFinalAlert() for each match
-//    → Sets final_push_sent = 1
+//  */3  0-1,8-23  * * *  Final score push trigger
+//    → Reads DB for result set + final_push_sent = 0 (scores are written by
+//      the */2 bg-poll above and by the /api/live flow when the tab is open)
+//    → Calls sendGameFinalAlert() for each match, sets final_push_sent = 1
 //
-//  */5  8-23  * * *  Game-start push trigger             (Phase 1)
+//  */5  0-1,8-23  * * *  Game-start push trigger
 //    → Reads DB for games starting within 20 min + push_sent = 0
-//    → Calls sendGameStartAlert()
-//    → Sets push_sent = 1
+//    → Calls sendGameStartAlert(), sets push_sent = 1
 //
-//  0 3   *  *  *     Subscription cleanup               (Phase 1)
-//    → Deletes expired game_subscriptions + orphaned push_subscriptions
+//  0 3   *  *  *     Subscription cleanup
+//    → Deletes game_subscriptions for past events (push_subscriptions are only
+//      removed via 410s at send time — see cleanupExpiredSubscriptions)
 //
 //  The */2 and */3 jobs are intentionally decoupled:
-//    - */2 writes scores to DB, never sends pushes
-//    - */3 reads DB scores, sends push notifications
+//    - */2 writes scores to DB
+//    - */3 reads DB scores, sends final-score push notifications
 //  Maximum latency from game end to notification: ~5 minutes
 //  (2-min poll interval + 3-min push check interval).
 
@@ -35,7 +39,7 @@ let bgPollRunning = false;
 
 function startScheduler() {
   // Every 2 minutes during game hours: background score poller
-  cron.schedule('*/2 8-23 * * *', async () => {
+  cron.schedule('*/2 0-1,8-23 * * *', async () => {
     if (bgPollRunning) {
       console.log('[bg-poll] Already running — skipping tick');
       return;
@@ -79,7 +83,7 @@ function startScheduler() {
   });
 
   // Every 5 minutes during game hours: send game-start push notifications
-  cron.schedule('*/5 8-23 * * *', async () => {
+  cron.schedule('*/5 0-1,8-23 * * *', async () => {
     try {
       const events = getEventsPendingPush();
       for (const event of events) {
@@ -95,11 +99,9 @@ function startScheduler() {
   });
 
   // Every 3 minutes during game hours: send final-score push notifications.
-  // Score data is written to DB by the frontend-driven /api/live flow (fetchLiveGames).
-  // If no user has the live tab open when a game ends, DB scores won't be updated
-  // until the nightly sync runs — this is a known limitation of the frontend-dependent
-  // score writing approach.
-  cron.schedule('*/3 8-23 * * *', async () => {
+  // Scores are written by the */2 bg-poll (and opportunistically by /api/live
+  // when someone has the Live tab open); this job only reads and notifies.
+  cron.schedule('*/3 0-1,8-23 * * *', async () => {
     try {
       const ended = getEndedGamesWithSubscribers();
       for (const event of ended) {
@@ -115,7 +117,7 @@ function startScheduler() {
   cron.schedule('0 3 * * *', () => {
     try {
       const result = cleanupExpiredSubscriptions();
-      console.log(`[scheduler] cleanup: removed ${result.deleted} game_subs, ${result.orphans} orphan push_subs`);
+      console.log(`[scheduler] cleanup: removed ${result.deleted} expired game_subs`);
     } catch (err) {
       console.error('[scheduler] cleanup failed:', err.message);
     }

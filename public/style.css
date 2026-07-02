@@ -84,6 +84,9 @@ header {
   position: sticky;
   top: 0;
   z-index: 100;
+  /* Safety net: if some viewport/font combo still can't fit the controls,
+     degrade to a slightly tight header — never a page-wide sideways scroll. */
+  overflow-x: clip;
 }
 
 /* Fixed-height content zone — always exactly 56px, centered regardless of inset */
@@ -355,6 +358,31 @@ aside {
 
 .btn-clear-filters:hover { border-color: var(--maroon); color: var(--ink-accent); }
 
+/* In-sheet Subscribe button — mobile only (the header 📅 hides ≤767px to fit
+   the bar; this replaces it inside the filter sheet). */
+.btn-subscribe-sheet {
+  display: none;
+  width: 100%;
+  padding: 8px;
+  background: var(--gold);
+  color: #1a1a1a;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+/* Backdrop behind the mobile filter sheet (only ever shown ≤767px) */
+#sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 199;
+}
+
 /* ── Main content ── */
 main {
   flex: 1;
@@ -577,11 +605,6 @@ main {
   color: var(--ink-accent);
   font-size: 0.82rem;
   text-decoration: underline;
-}
-
-/* ── Status bar ── */
-#status-bar {
-  display: none;
 }
 
 /* ── Score badges ── */
@@ -1216,30 +1239,38 @@ main {
     min-height: 100vh;
   }
 
+  /* Header must fit 320–430px phones: Sparky only (no wordmark), the 📅
+     Subscribe button moves into the filter sheet, and the view-toggle sizes
+     fluidly with clamp() so it compresses continuously instead of fitting
+     only specific tested widths. */
   .header-inner {
-    padding: 0 12px;
+    padding: 0 10px;
     gap: 8px;
+    min-width: 0;
   }
 
+  .logo-wordmark { display: none; }
   .logo-text { display: none; }
 
-  .header-controls { gap: 6px; }
+  .btn-subscribe { display: none; }
+
+  .header-controls { gap: 4px; }
 
   .view-toggle button {
-    padding: 5px 7px;
-    font-size: 0.78rem;
+    padding: 5px clamp(4px, 1.6vw, 7px);
+    font-size: clamp(0.68rem, 3vw, 0.78rem);
   }
 
   .btn-refresh,
   .btn-theme {
-    padding: 5px 8px;
+    padding: 5px 7px;
     font-size: 0.78rem;
   }
 
   .btn-filters-toggle {
     display: block;
     padding: 5px 8px;
-    font-size: 0.78rem;
+    font-size: clamp(0.68rem, 3vw, 0.78rem);
   }
 
   .app-body {
@@ -1255,18 +1286,45 @@ main {
     overflow: hidden;
   }
 
+  /* Filters = bottom sheet. The old layout put the open sidebar BELOW a
+     full-viewport-height main (order:2 in the column flow) — it landed off
+     screen at the very bottom and was effectively unreachable. */
   aside {
-    order: 2;
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 200;
     width: 100%;
-    height: auto;
-    max-height: none;
+    max-height: 75vh;  /* fallback */
+    max-height: 75dvh; /* iOS Safari collapsing URL bar */
+    overflow-y: auto;
     border-right: none;
     border-top: 1px solid var(--border);
-    flex-shrink: 0;
-    display: none;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.35);
+    /* home-indicator clearance on notched iPhones (viewport-fit=cover) */
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
   aside.open { display: flex; }
+
+  /* Grabber bar affordance */
+  aside.open::before {
+    content: '';
+    display: block;
+    width: 44px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    margin: -6px auto 2px;
+    flex-shrink: 0;
+  }
+
+  #sidebar-backdrop.open { display: block; }
+
+  .btn-subscribe-sheet { display: block; }
 
   #calendar-view { padding: 8px; }
   #list-view { padding: 12px 16px; }

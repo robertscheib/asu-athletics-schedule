@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const { upsertMany } = require('./db');
+const { upsertMany, deleteStaleFutureFeedEvents } = require('./db');
 const { USER_AGENT } = require('./lib/constants');
 
 const FEED_URL = 'https://sundevils.com/feeds/json/node/wmt_events';
@@ -15,7 +15,9 @@ const STATE_MAP = {
   OK:'Oklahoma', OR:'Oregon', PA:'Pennsylvania', RI:'Rhode Island', SC:'South Carolina',
   SD:'South Dakota', TN:'Tennessee', TX:'Texas', UT:'Utah', VT:'Vermont',
   VA:'Virginia', WA:'Washington', WV:'West Virginia', WI:'Wisconsin', WY:'Wyoming',
-  DC:'Washington D.C.'
+  // Must match the REGIONS table in db.js (Northeast) or DC events never
+  // match the region filter.
+  DC:'District of Columbia'
 };
 
 function parseAddress(address) {
@@ -40,7 +42,9 @@ function parseEvent(raw) {
     : (typeof raw.locations === 'string' ? raw.locations : null);
 
   return {
-    id: String(raw.id),
+    // Guard the null case: String(undefined) === 'undefined' passed the id
+    // filter below and collapsed every id-less event into one row.
+    id: raw.id != null ? String(raw.id) : null,
     title: raw.title || null,
     sport: raw.sport_tag || null,
     season: raw.season ? String(raw.season) : null,
@@ -80,6 +84,13 @@ async function fetchAndStore() {
 
   const events = raw.map(parseEvent).filter(e => e.id && e.start_date);
   upsertMany(events);
+
+  // Remove future events the feed no longer carries (canceled games). Bounded
+  // and guarded — see deleteStaleFutureFeedEvents in db.js.
+  const pruned = deleteStaleFutureFeedEvents(events);
+  if (pruned.deleted) {
+    console.log(`[fetcher] Pruned ${pruned.deleted} canceled event(s): ${pruned.titles.join(' | ')}`);
+  }
 
   console.log(`[fetcher] Upserted ${events.length} events`);
   return events.length;

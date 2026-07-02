@@ -83,16 +83,37 @@ async function requestNotifyPermission() {
   }
 }
 
-// Track which ESPN event IDs we've already notified about (persists across polls)
-const _notifiedIds = new Set(store.getJSON('asu-notified-ids', []));
+// Track which ESPN event IDs we've already notified about (persists across
+// polls). Stored as { id: notifiedAtMs } and pruned after 48h — the old
+// id array grew in localStorage forever.
+const _notifiedAt = (() => {
+  const raw = store.getJSON('asu-notified-ids', {});
+  if (Array.isArray(raw)) {
+    // Migrate old Set-array format
+    const m = {};
+    for (const id of raw) m[id] = Date.now();
+    return m;
+  }
+  return raw && typeof raw === 'object' ? raw : {};
+})();
+
+function _pruneNotified() {
+  const cutoff = Date.now() - 48 * 3600 * 1000;
+  for (const id of Object.keys(_notifiedAt)) {
+    if (_notifiedAt[id] < cutoff) delete _notifiedAt[id];
+  }
+}
 
 function _checkAndNotify(games) {
-  if (Notification.permission !== 'granted') return;
+  // typeof guard: iOS Safari tabs have NO Notification global — a bare
+  // reference throws and would kill the rest of every pollLive() tick.
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const liveGames = games.filter(g => g.state === 'live');
   for (const game of liveGames) {
-    if (!game.espnEventId || _notifiedIds.has(game.espnEventId)) continue;
-    _notifiedIds.add(game.espnEventId);
-    store.setJSON('asu-notified-ids', [..._notifiedIds]);
+    if (!game.espnEventId || _notifiedAt[game.espnEventId]) continue;
+    _notifiedAt[game.espnEventId] = Date.now();
+    _pruneNotified();
+    store.setJSON('asu-notified-ids', _notifiedAt);
     const title = 'ASU Game Live Now';
     const body  = `${game.sport}: ${shortOppName(game.oppName)} — ${game.asuScore ?? 0}–${game.oppScore ?? 0}`;
     new Notification(title, {
@@ -239,12 +260,18 @@ function _afterRenderHooks(container, games, liveGames, upcomingGames, finalGame
     window.loadNews();
   }
 
-  // Start countdown after DOM insert
+  // Start countdown after DOM insert. Element-existence guards matter: there
+  // is ONE shared countdown timer, and starting it for an element that this
+  // render didn't produce (e.g. next-countdown when upcoming+final coexist)
+  // cleared the live-countdown's interval and froze it.
   if (upcomingGames.length > 0 && liveGames.length === 0) {
     const soonest = upcomingGames.reduce((a, b) => a.startTime < b.startTime ? a : b);
-    if (soonest.startTime) startCountdown('live-countdown', soonest.startTime);
+    if (soonest.startTime && document.getElementById('live-countdown')) {
+      startCountdown('live-countdown', soonest.startTime);
+    }
   }
-  if ((finalGames.length > 0 || !games.length) && nextGame && nextGame.startTime) {
+  if ((finalGames.length > 0 || !games.length) && nextGame && nextGame.startTime &&
+      document.getElementById('next-countdown')) {
     startCountdown('next-countdown', nextGame.startTime);
   }
 }

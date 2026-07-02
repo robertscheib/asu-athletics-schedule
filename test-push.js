@@ -6,10 +6,11 @@
 //   node test-push.js final <eventId>
 //   node test-push.js bg-poll
 
-const { loadSecretsFallback } = require('./lib/env');
-
-if (!loadSecretsFallback()) {
-  console.warn('[test-push] secrets.env not found — VAPID keys must already be in environment');
+// VAPID keys must be in the environment for start/final sends — when running
+// from a shell (outside systemd), source ~/projects/secrets.env first:
+//   set -a; . ~/projects/secrets.env; set +a; node test-push.js ...
+if (!process.env.VAPID_PUBLIC_KEY) {
+  console.warn('[test-push] VAPID_* not in env — `list` works, but sends will fail. Source ~/projects/secrets.env first.');
 }
 
 const db = require('./db');

@@ -54,12 +54,14 @@ function rankBadgeHTML(rank) {
   return rank ? `<span class="rank-badge">#${esc(rank)}</span> ` : '';
 }
 
+// Feed seasons are the ENDING year ('2026' = the 2025–26 athletic year);
+// compound '2026_27' values are cross-year "full" seasons. Computed, not a
+// lookup table — hardcoded years silently mislabeled every new season.
 function seasonLabel(val) {
-  if (val === '2025')    return '2024–25';
-  if (val === '2026')    return '2025–26';
-  if (val === '2025_26') return '2024–25 (Full)';
-  if (val === '2026_27') return '2025–26 (Full)';
-  return val;
+  const m = String(val || '').match(/^(\d{4})(_\d{2})?$/);
+  if (!m) return val;
+  const yr = parseInt(m[1], 10);
+  return `${yr - 1}–${String(yr).slice(2)}${m[2] ? ' (Full)' : ''}`;
 }
 
 function formatTs(ts) {
@@ -83,13 +85,16 @@ const SPORT_COLORS = [
   '#F39C12', '#6C3483', '#1F618D', '#117A65', '#7D6608',
 ];
 const sportColorMap = {};
-let colorIdx = 0;
 
+// Hash the sport name to a palette index so a sport's color is stable across
+// sessions and views (the old first-come counter assigned colors by call
+// order, so the same sport could change color between visits).
 function sportColor(sport) {
   if (!sport) return '#8C1D40';
   if (!sportColorMap[sport]) {
-    sportColorMap[sport] = SPORT_COLORS[colorIdx % SPORT_COLORS.length];
-    colorIdx++;
+    let h = 0;
+    for (let i = 0; i < sport.length; i++) h = (h * 31 + sport.charCodeAt(i)) >>> 0;
+    sportColorMap[sport] = SPORT_COLORS[h % SPORT_COLORS.length];
   }
   return sportColorMap[sport];
 }

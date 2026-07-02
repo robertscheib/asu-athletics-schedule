@@ -14,6 +14,14 @@ const REGIONS = {
 
 const db = new Database(path.join(__dirname, 'events.db'));
 
+// WAL + busy_timeout: the documented verification workflow runs a second
+// instance (PORT=3100) against the same DB — without these, concurrent access
+// risks SQLITE_BUSY. foreign_keys makes the game_subscriptions CASCADE real
+// (it was silently inert; SQLite ships with FKs off per-connection).
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('foreign_keys = ON');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS feedback (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +134,42 @@ const upsertMany = db.transaction((events) => {
   for (const event of events) upsertEvent.run(event);
 });
 
+// Prune future feed-sourced events that vanished from the feed (canceled /
+// rescheduled-under-new-id games used to linger forever). Scope guards:
+//  - only feed rows (espn_* auto-inserts are never in the feed) — NOT GLOB,
+//    not LIKE: underscore is a LIKE wildcard;
+//  - only within the feed's own forward horizon: the feed may emit a shorter
+//    window than an earlier fetch stored — events beyond its last date are
+//    out of the feed's sight, not cancellations;
+//  - bail out loudly if the prune looks like a feed hiccup (> 20 events).
+// feedEvents: the parsed rows just upserted ({ id, start_date }).
+const _delSubsForEventStmt = db.prepare('DELETE FROM game_subscriptions WHERE event_id = ?');
+const _delEventByIdStmt    = db.prepare('DELETE FROM events WHERE id = ?');
+
+function deleteStaleFutureFeedEvents(feedEvents) {
+  const now = Math.floor(Date.now() / 1000);
+  const feedSet = new Set(feedEvents.map(e => e.id));
+  const horizon = Math.max(...feedEvents.map(e => e.start_date || 0));
+  if (!Number.isFinite(horizon) || horizon <= now) return { deleted: 0, titles: [] };
+
+  const candidates = db.prepare(
+    "SELECT id, title FROM events WHERE start_date > @now AND start_date <= @horizon AND id NOT GLOB 'espn_*'"
+  ).all({ now, horizon });
+  const stale = candidates.filter(e => !feedSet.has(e.id));
+  if (!stale.length) return { deleted: 0, titles: [] };
+  if (stale.length > 20) {
+    console.warn(`[db] stale-event prune skipped: ${stale.length} candidates looks like a feed hiccup, not cancellations`);
+    return { deleted: 0, titles: [], skipped: stale.length };
+  }
+  db.transaction(() => {
+    for (const e of stale) {
+      _delSubsForEventStmt.run(e.id); // subscribers of a canceled game just lose the alert
+      _delEventByIdStmt.run(e.id);
+    }
+  })();
+  return { deleted: stale.length, titles: stale.map(e => e.title) };
+}
+
 function queryEvents({ sport, game_type, city, state, region, from, to, season } = {}) {
   const conditions = [];
   const params = {};
@@ -155,13 +199,16 @@ function queryEvents({ sport, game_type, city, state, region, from, to, season }
     conditions.push(`state IN (${placeholders})`);
     regionStates.forEach((s, i) => { params[`rs${i}`] = s; });
   }
-  if (from) {
+  // Ignore non-numeric from/to — binding NaN would make better-sqlite3 throw (500).
+  const fromN = Number(from);
+  if (from != null && from !== '' && Number.isFinite(fromN)) {
     conditions.push('start_date >= @from');
-    params.from = Number(from);
+    params.from = fromN;
   }
-  if (to) {
+  const toN = Number(to);
+  if (to != null && to !== '' && Number.isFinite(toN)) {
     conditions.push('start_date <= @to');
-    params.to = Number(to);
+    params.to = toN;
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -219,6 +266,20 @@ function getRecordsBySeason() {
   return { overall, bySport: rows, label };
 }
 
+// Default filter season: most recent (non-compound) season with completed
+// results — so the off-season shows last season's games — else the most
+// recent season at all. Frontend used to fetch EVERY event to derive this.
+function getDefaultSeason() {
+  const withResults = db.prepare(
+    "SELECT season FROM events WHERE result IS NOT NULL AND season IS NOT NULL AND instr(season, '_') = 0 ORDER BY season DESC LIMIT 1"
+  ).get();
+  if (withResults) return withResults.season;
+  const any = db.prepare(
+    "SELECT season FROM events WHERE season IS NOT NULL AND instr(season, '_') = 0 ORDER BY season DESC LIMIT 1"
+  ).get();
+  return any ? any.season : null;
+}
+
 function getSports() {
   return db.prepare('SELECT DISTINCT sport FROM events WHERE sport IS NOT NULL ORDER BY sport').all().map(r => r.sport);
 }
@@ -268,8 +329,10 @@ function upsertESPNEvent(event) {
 }
 
 function getEventsNeedingGeocode() {
+  // city/state must be selected: the geocoder falls back to a "City, State"
+  // query for events with no venue_address.
   return db.prepare(
-    'SELECT id, venue_address, location_name, game_type FROM events WHERE lat IS NULL AND (venue_address IS NOT NULL OR (city IS NOT NULL AND state IS NOT NULL))'
+    'SELECT id, venue_address, location_name, game_type, city, state FROM events WHERE lat IS NULL AND (venue_address IS NOT NULL OR (city IS NOT NULL AND state IS NOT NULL))'
   ).all();
 }
 
@@ -382,14 +445,10 @@ function cleanupExpiredSubscriptions() {
     WHERE event_id IN (SELECT id FROM events WHERE start_date < @cutoff)
   `).run({ cutoff }).changes;
 
-  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 86400;
-  const orphans = db.prepare(`
-    DELETE FROM push_subscriptions
-    WHERE created_at < @cutoff
-    AND id NOT IN (SELECT DISTINCT subscription_id FROM game_subscriptions)
-  `).run({ cutoff: thirtyDaysAgo }).changes;
-
-  return { deleted, orphans };
+  // Deliberately NO age-based purge of push_subscriptions: it stranded healthy
+  // devices (client skipped re-registering a known endpoint → permanent 409s).
+  // Dead endpoints are removed by the 410 handling in push.js at send time.
+  return { deleted };
 }
 
 function getEventsPendingPush() {
@@ -452,4 +511,4 @@ function hasPushSubscription(endpoint) {
   return !!db.prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint').get({ endpoint });
 }
 
-module.exports = { upsertMany, queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, getEventCount, updateScore, updateLiveScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, getGameSubscribersForType, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows, hasPushSubscription };
+module.exports = { upsertMany, deleteStaleFutureFeedEvents, queryEvents, getSports, getSeasons, getDefaultSeason, getRecordsBySeason, getLocations, getEventCount, updateScore, updateLiveScore, upsertESPNEvent, getEventsNeedingGeocode, updateCoordinates, REGIONS, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, getGameSubscribers, getGameSubscribersForType, cleanupExpiredSubscriptions, getEventsPendingPush, markPushSent, getEventById, updateGameStatus, markFinalPushSent, getEndedGamesWithSubscribers, getActiveGameWindows, hasPushSubscription };

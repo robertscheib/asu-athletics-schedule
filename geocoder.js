@@ -27,6 +27,11 @@ const GEO_SKIP = { lat: 0, lng: 0 };
 // Venues Nominatim can't resolve — add new entries here as needed.
 const KNOWN_VENUES = {
   '1 N National Championship Dr, Tucson, AZ 85719': { lat: 32.2226, lng: -110.9747 }, // Kino Sports Complex
+  // Golf venues Nominatim can't resolve from the feed's addresses (2026-07):
+  '68-1050 Makaiwa Pl, Waimea, HI 96743':                        { lat: 19.9417, lng: -155.8657 }, // Mauna Lani Golf Resort
+  'Carretera Transpeninsular Km. 12.5, Int. Bahia, Playa Santa': { lat: 22.9353, lng: -109.8270 }, // Twin Dolphin Club, Cabo
+  '3700 SW Floridian Dr, Palm City, FL 34990':                   { lat: 27.2085, lng: -80.2889 },  // Floridian Golf Club
+  '2400 Brunes Mill Rd, Columbus, TX 78934':                     { lat: 29.7066, lng: -96.5397 },  // Big Easy Ranch (city-level pin)
 };
 
 function cleanSuiteUnit(address) {
@@ -51,7 +56,25 @@ function dehyphenate(address) {
   return address.replace(/^(\d+)-\d+/, '$1');
 }
 
+// Nominatim's policy is 1 req/s — a concurrent second pass (nightly cron +
+// /api/refresh fire-and-forget + startup backfill can overlap) would double
+// that, so runs are serialized: overlapping callers get a no-op result.
+let _geocodeRunning = false;
+
 async function geocodeAllMissing() {
+  if (_geocodeRunning) {
+    console.log('[geocoder] Pass already running — skipping this call');
+    return { success: 0, failed: 0, skipped: true };
+  }
+  _geocodeRunning = true;
+  try {
+    return await _geocodeAllMissing();
+  } finally {
+    _geocodeRunning = false;
+  }
+}
+
+async function _geocodeAllMissing() {
   const events = getEventsNeedingGeocode();
   if (events.length === 0) {
     console.log('[geocoder] No events need geocoding');
@@ -61,14 +84,18 @@ async function geocodeAllMissing() {
   console.log(`[geocoder] Geocoding ${events.length} events`);
 
   // Deduplicate by address — only call Nominatim once per unique address.
+  // Events with no venue_address but a city+state (the query already selects
+  // them) geocode via a "City, State" query — without this they were
+  // re-selected on every pass and never processed.
   // Carry location_name and game_type for mailbox-address fallback.
   const addressMap = {};
   for (const e of events) {
-    if (!e.venue_address) continue;
-    if (!addressMap[e.venue_address]) {
-      addressMap[e.venue_address] = { ids: [], location_name: e.location_name, game_type: e.game_type };
+    const key = e.venue_address || (e.city && e.state ? `${e.city}, ${e.state}` : null);
+    if (!key) continue;
+    if (!addressMap[key]) {
+      addressMap[key] = { ids: [], location_name: e.location_name, game_type: e.game_type };
     }
-    addressMap[e.venue_address].ids.push(e.id);
+    addressMap[key].ids.push(e.id);
   }
 
   let success = 0;

@@ -30,20 +30,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       const wrapper = document.createElement('div');
       wrapper.className = 'fc-event-main-frame';
 
+      // Feed/ESPN strings land in innerHTML — esc() everything upstream-controlled.
       let extraLine = '';
       if (liveGame) {
-        extraLine = `<div class="fc-live-line"><span class="live-badge-sm">LIVE</span> ${liveGame.asuScore}–${liveGame.oppScore} <span class="fc-live-situation">${liveGame.situation}</span></div>`;
+        extraLine = `<div class="fc-live-line"><span class="live-badge-sm">LIVE</span> ${esc(liveGame.asuScore)}–${esc(liveGame.oppScore)} <span class="fc-live-situation">${esc(liveGame.situation)}</span></div>`;
       } else if (raw?.result) {
         const colorClass = raw.result === 'W' ? 'score-w' : raw.result === 'L' ? 'score-l' : 'score-t';
-        extraLine = `<div class="fc-score-line ${colorClass}">${raw.result} ${raw.asu_score}-${raw.opp_score}</div>`;
+        extraLine = `<div class="fc-score-line ${colorClass}">${esc(raw.result)} ${esc(raw.asu_score)}-${esc(raw.opp_score)}</div>`;
       }
 
       const sport = raw?.sport || '';
       wrapper.innerHTML = `
-        <div class="fc-event-time">${info.timeText}</div>
+        <div class="fc-event-time">${esc(info.timeText)}</div>
         <div class="fc-event-title-container">
-          ${sport ? `<div class="fc-event-sport">${sport}</div>` : ''}
-          <div class="fc-event-title fc-sticky">${rankBadgeHTML(raw?.opp_rank)}${info.event.title}</div>
+          ${sport ? `<div class="fc-event-sport">${esc(sport)}</div>` : ''}
+          <div class="fc-event-title fc-sticky">${rankBadgeHTML(raw?.opp_rank)}${esc(info.event.title)}</div>
           ${extraLine}
         </div>`;
       return { domNodes: [wrapper] };
@@ -202,14 +203,14 @@ function listEventHTML(e) {
 
   const metaParts = [
     e.location_name || (e.city ? `${e.city}, ${e.state || ''}`.trim().replace(/,$/, '') : null)
-  ].filter(Boolean);
+  ].filter(Boolean).map(esc);
   const badges = e.badges
-    ? e.badges.split('|').filter(Boolean).map(b => `<span class="badge">${b.trim()}</span>`).join('')
+    ? e.badges.split('|').filter(Boolean).map(b => `<span class="badge">${esc(b.trim())}</span>`).join('')
     : '';
 
   const scoreClass = e.result === 'W' ? 'score-w' : e.result === 'L' ? 'score-l' : 'score-t';
   const scoreHTML = e.result
-    ? `<span class="score-badge ${scoreClass}">${e.result} ${e.asu_score}–${e.opp_score}</span>`
+    ? `<span class="score-badge ${scoreClass}">${esc(e.result)} ${esc(e.asu_score)}–${esc(e.opp_score)}</span>`
     : '';
 
   const logoHTML = typeof eventLogoHTML === 'function' ? eventLogoHTML(e) : '';
@@ -220,8 +221,9 @@ function listEventHTML(e) {
     ? window.bellIconHTML(e.id, true, undefined, e.sport)
     : '';
 
-  // stopPropagation keeps the row's modal click from firing on the link
-  const ticketHtml = isFuture && e.ticket_url
+  // stopPropagation keeps the row's modal click from firing on the link;
+  // http(s)-only guard blocks javascript: URLs from a compromised feed
+  const ticketHtml = isFuture && e.ticket_url && /^https?:\/\//i.test(e.ticket_url)
     ? `<a class="list-ticket-link" href="${esc(e.ticket_url)}" target="_blank" rel="noopener"
          onclick="event.stopPropagation()">🎟 ${esc(e.ticket_label || 'Tickets')}</a>`
     : '';
@@ -230,18 +232,18 @@ function listEventHTML(e) {
     <div class="list-event-bar" style="background:${color}"></div>
     ${logoHTML}
     <div class="list-event-main">
-      <div class="list-event-title">${rankBadgeHTML(e.opp_rank)}${shortTitle(e.title)}${badges}</div>
+      <div class="list-event-title">${rankBadgeHTML(e.opp_rank)}${esc(shortTitle(e.title))}${badges}</div>
       <div class="list-event-meta">${
         e.sport
-          ? `<span style="font-weight:600;color:${color}">${e.sport}</span>`
+          ? `<span style="font-weight:600;color:${color}">${esc(e.sport)}</span>`
           : ''
       }${metaParts.length ? (e.sport ? ' · ' : '') + metaParts.join(' · ') : ''}</div>
     </div>
     <div class="list-event-right">
       <div class="list-event-time">${time}</div>
       ${scoreHTML ? `<div>${scoreHTML}</div>` : ''}
-      <div class="list-event-type">${capitalize(e.game_type || '')}${
-        e.tv_network ? ' · 📺 ' + e.tv_network : ''
+      <div class="list-event-type">${esc(capitalize(e.game_type || ''))}${
+        e.tv_network ? ' · 📺 ' + esc(e.tv_network) : ''
       }</div>
       ${ticketHtml}
       ${bellHtml}

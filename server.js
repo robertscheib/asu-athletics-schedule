@@ -3,12 +3,11 @@ const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fetch = require('node-fetch');
-const { queryEvents, getSports, getSeasons, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, hasPushSubscription } = require('./db');
+const { queryEvents, getSports, getSeasons, getDefaultSeason, getRecordsBySeason, getLocations, insertFeedback, getUnreadCount, getAllFeedback, markRead, markAllRead, deleteFeedback, upsertPushSubscription, deletePushSubscription, addGameSubscription, removeGameSubscription, hasPushSubscription, getEventById, REGIONS } = require('./db');
 const { fetchAndStore } = require('./fetcher');
 const { geocodeAllMissing } = require('./geocoder');
 const { fetchLiveGames } = require('./scores');
 const { startScheduler } = require('./scheduler');
-const { loadSecretsFallback } = require('./lib/env');
 const { USER_AGENT, SITE_HOST } = require('./lib/constants');
 const { ESPN_SPORT_SLUGS, TOURNAMENT_RE } = require('./lib/sports-config');
 const { TtlCache } = require('./lib/cache');
@@ -18,8 +17,10 @@ const standings = require('./lib/standings');
 const { getHeadToHead } = require('./lib/h2h');
 const team = require('./lib/team');
 
-loadSecretsFallback();
-
+// All secrets (CF_*, ADMIN_TOKEN, VAPID_*) come from the systemd
+// EnvironmentFile (~/projects/secrets.env on both boxes). The old
+// unifi-scripts/secrets.env fallback was removed 2026-07 — that file no
+// longer exists anywhere.
 const { version: APP_VERSION } = require('./package.json');
 const _releasesData = require('./releases.json');
 
@@ -29,6 +30,13 @@ const cfStatsCache  = new TtlCache(); // `${days}`   → Cloudflare stats JSON
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Behind a reverse proxy the client IP arrives in X-Forwarded-For; without
+// trust proxy, req.ip is always the tunnel/NPM origin and every rate limiter
+// below shares ONE bucket across all visitors (and express-rate-limit logs
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR). Hops: prod = 1 (cloudflared on-box),
+// dev = 2 (HA tunnel → NPM) — set TRUST_PROXY_HOPS=2 in the dev drop-in.
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS, 10) || 1);
 
 // Security headers
 app.use(helmet({
@@ -64,6 +72,16 @@ const adminLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Admin auth — shared secret from secrets.env (ADMIN_TOKEN, name only; value
+// lives in ~/projects/secrets.env on each box). Locked (503) when unset so a
+// missing secret fails closed rather than leaving the endpoints open.
+function requireAdmin(req, res, next) {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) return res.status(503).json({ error: 'Admin not configured' });
+  if (req.get('x-admin-token') !== token) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
 
 app.use(express.json());
 
@@ -113,11 +131,26 @@ app.get('/api/locations', generalLimit, (req, res) => {
   }
 });
 
+// Single source for the region→states table (db.js) — the frontend used to
+// carry its own copy, which had already drifted (DC naming).
+app.get('/api/regions', generalLimit, (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.json(REGIONS);
+});
+
 app.get('/api/seasons', generalLimit, (req, res) => {
   try {
     res.json(getSeasons());
   } catch (err) {
     res.status(500).json({ error: 'Failed to query seasons' });
+  }
+});
+
+app.get('/api/seasons/default', generalLimit, (req, res) => {
+  try {
+    res.json({ season: getDefaultSeason() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to query default season' });
   }
 });
 
@@ -129,7 +162,7 @@ app.post('/api/refresh', adminLimit, async (req, res) => {
     geocodeAllMissing().catch(err => console.error('[api] Geocode pass failed:', err.message));
   } catch (err) {
     console.error('[api] /api/refresh error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Refresh failed' });
   }
 });
 
@@ -158,7 +191,7 @@ app.get('/api/live', liveLimit, async (req, res) => {
     res.json({ games, tournaments, nextGame, records });
   } catch (err) {
     console.error('[api] /api/live error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to load live data' });
   }
 });
 
@@ -171,9 +204,11 @@ app.get('/api/bracket', liveLimit, async (req, res) => {
     res.json({ rounds: [], source: 'not-implemented', sport, tournamentId });
   } catch (err) {
     console.error('[api] /api/bracket error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to load bracket' });
   }
 });
+
+const VALID_FEEDBACK_PAGES = new Set(['calendar', 'list', 'map', 'live']);
 
 app.post('/api/feedback', generalLimit, (req, res) => {
   try {
@@ -187,12 +222,14 @@ app.post('/api/feedback', generalLimit, (req, res) => {
     if (rating != null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
       return res.status(400).json({ error: 'Rating must be an integer between 1 and 5' });
     }
-    const user_agent = req.headers['user-agent'] ?? null;
-    const id = insertFeedback({ page: page ?? null, rating: rating ?? null, message: message ?? null, user_agent });
+    // page is attacker-controlled and rendered in the admin portal — whitelist it.
+    const safePage = VALID_FEEDBACK_PAGES.has(page) ? page : null;
+    const user_agent = (req.headers['user-agent'] ?? '').slice(0, 400) || null;
+    const id = insertFeedback({ page: safePage, rating: rating ?? null, message: message ?? null, user_agent });
     res.json({ success: true, id });
   } catch (err) {
     console.error('[api] /api/feedback error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
 
@@ -205,50 +242,46 @@ app.get('/api/feedback/unread-count', generalLimit, (req, res) => {
   }
 });
 
-app.get('/api/admin/feedback', adminLimit, (req, res) => {
+app.get('/api/admin/feedback', generalLimit, requireAdmin, (req, res) => {
   try {
-    const origin = req.headers['origin'] || req.headers['referer'] || '';
-    if (!origin.includes(SITE_HOST)) {
-      console.warn('[api] /api/admin/feedback accessed from unexpected origin:', origin);
-    }
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const offset = parseInt(req.query.offset) || 0;
     res.json(getAllFeedback(limit, offset));
   } catch (err) {
     console.error('[api] /api/admin/feedback error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to load feedback' });
   }
 });
 
-app.post('/api/admin/feedback/:id/read', adminLimit, (req, res) => {
+app.post('/api/admin/feedback/:id/read', generalLimit, requireAdmin, (req, res) => {
   try {
     const changes = markRead(req.params.id);
     if (changes === 0) return res.status(404).json({ error: 'Not found' });
     res.json({ success: true });
   } catch (err) {
     console.error('[api] /api/admin/feedback/:id/read error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to update feedback' });
   }
 });
 
-app.delete('/api/admin/feedback/:id', adminLimit, (req, res) => {
+app.delete('/api/admin/feedback/:id', generalLimit, requireAdmin, (req, res) => {
   try {
     const changes = deleteFeedback(req.params.id);
     if (changes === 0) return res.status(404).json({ error: 'Not found' });
     res.json({ success: true });
   } catch (err) {
     console.error('[api] /api/admin/feedback/:id delete error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to delete feedback' });
   }
 });
 
-app.post('/api/admin/feedback/read-all', adminLimit, (req, res) => {
+app.post('/api/admin/feedback/read-all', generalLimit, requireAdmin, (req, res) => {
   try {
     const count = markAllRead();
     res.json({ success: true, count });
   } catch (err) {
     console.error('[api] /api/admin/feedback/read-all error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to update feedback' });
   }
 });
 
@@ -258,7 +291,7 @@ app.post('/api/geocode', adminLimit, async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[api] /api/geocode error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Geocode failed' });
   }
 });
 
@@ -320,6 +353,11 @@ app.get('/api/game/:espnEventId', generalLimit, async (req, res) => {
   const { espnEventId } = req.params;
   const { sport } = req.query;
 
+  // Numeric only: the id is interpolated into the ESPN URL and keys an
+  // unbounded cache — reject junk before it reaches either.
+  if (!/^\d{1,20}$/.test(espnEventId)) {
+    return res.status(400).json({ error: 'Invalid event id' });
+  }
   if (!sport || !(sport in ESPN_SPORT_SLUGS)) {
     return res.status(400).json({ error: 'Unknown sport' });
   }
@@ -403,7 +441,7 @@ app.get('/api/events.ics', generalLimit, (req, res) => {
     res.send(body);
   } catch (err) {
     console.error('[api] /api/events.ics error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to build calendar' });
   }
 });
 
@@ -478,34 +516,47 @@ app.get('/api/vapid-public-key', (req, res) => {
   res.json({ publicKey });
 });
 
+// Push endpoints are URLs this server will later POST to (via web-push) —
+// require https and a sane length so junk/internal URLs can't be registered.
+function isValidPushEndpoint(endpoint) {
+  return typeof endpoint === 'string'
+    && endpoint.length <= 1024
+    && endpoint.startsWith('https://');
+}
+
 app.post('/api/subscribe', generalLimit, (req, res) => {
   try {
     const { endpoint, p256dh, auth, sportPrefs } = req.body ?? {};
-    if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+    if (!isValidPushEndpoint(endpoint)) return res.status(400).json({ error: 'valid https endpoint required' });
+    // A brand-new subscription must carry its crypto keys; empty keys are only
+    // allowed as a "keep existing" update (the prefs-only path from pwa.js).
+    if (!hasPushSubscription(endpoint) && (!p256dh || !auth)) {
+      return res.status(400).json({ error: 'p256dh and auth required for new subscriptions' });
+    }
     upsertPushSubscription(endpoint, p256dh, auth, Array.isArray(sportPrefs) ? sportPrefs : null);
     res.json({ success: true });
   } catch (err) {
     console.error('[api] /api/subscribe error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to save subscription' });
   }
 });
 
 app.post('/api/unsubscribe', generalLimit, (req, res) => {
   try {
     const { endpoint } = req.body ?? {};
-    if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+    if (!isValidPushEndpoint(endpoint)) return res.status(400).json({ error: 'valid https endpoint required' });
     deletePushSubscription(endpoint);
     res.json({ success: true });
   } catch (err) {
     console.error('[api] /api/unsubscribe error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to remove subscription' });
   }
 });
 
 app.post('/api/subscribe/game', generalLimit, (req, res) => {
   try {
     const { endpoint, eventId, types } = req.body ?? {};
-    if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
+    if (!isValidPushEndpoint(endpoint) || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
     if (!hasPushSubscription(endpoint)) return res.status(409).json({ error: 'push subscription not found — register device first' });
     const validTypes = ['game_start', 'score_update', 'final_score'];
     const safeTypes = Array.isArray(types) ? types.filter(t => validTypes.includes(t)) : null;
@@ -513,23 +564,27 @@ app.post('/api/subscribe/game', generalLimit, (req, res) => {
       removeGameSubscription(endpoint, eventId);
       return res.json({ success: true, action: 'unsubscribed' });
     }
+    // FKs are enforced now — reject unknown events cleanly instead of letting
+    // the insert die on the constraint. (Removals above stay allowed so a
+    // client can clean up after an event was pruned.)
+    if (!getEventById(eventId)) return res.status(400).json({ error: 'unknown eventId' });
     addGameSubscription(endpoint, eventId, safeTypes);
     res.json({ success: true, action: 'subscribed' });
   } catch (err) {
     console.error('[api] /api/subscribe/game error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to update game subscription' });
   }
 });
 
 app.delete('/api/subscribe/game', generalLimit, (req, res) => {
   try {
     const { endpoint, eventId } = req.body ?? {};
-    if (!endpoint || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
+    if (!isValidPushEndpoint(endpoint) || !eventId) return res.status(400).json({ error: 'endpoint and eventId required' });
     removeGameSubscription(endpoint, eventId);
     res.json({ success: true });
   } catch (err) {
     console.error('[api] /api/subscribe/game error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to update game subscription' });
   }
 });
 

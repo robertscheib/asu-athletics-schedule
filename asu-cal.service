@@ -1,3 +1,10 @@
+# Template — installed copies differ per box:
+#   dev  (Ubuntu VM):  User=robert, /home/robert/..., + drop-in dev-no-scheduler.conf
+#                      (DISABLE_SCHEDULER=1, TRUST_PROXY_HOPS=2)
+#   prod (Oracle VPS): User=ubuntu, /home/ubuntu/..., ExecStart=/usr/bin/node
+# secrets.env must hold CF_ANALYTICS_TOKEN, CF_ACCOUNT_ID, ADMIN_TOKEN, VAPID_*
+# (no fallback loader anymore — a missing file should fail loudly, hence no
+# '-' prefix on EnvironmentFile).
 [Unit]
 Description=ASU Sun Devil Athletics Calendar
 After=network.target
@@ -6,7 +13,7 @@ After=network.target
 Type=simple
 User=robert
 WorkingDirectory=/home/robert/projects/asu-athletics-schedule
-EnvironmentFile=-/home/robert/projects/secrets.env
+EnvironmentFile=/home/robert/projects/secrets.env
 ExecStart=/home/robert/.nvm/versions/node/v24.13.1/bin/node server.js
 Restart=on-failure
 RestartSec=5

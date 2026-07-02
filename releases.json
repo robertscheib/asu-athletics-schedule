@@ -1,6 +1,21 @@
 {
   "releases": [
     {
+      "version": "1.3.0",
+      "date": "2026-07-02",
+      "title": "Faster, Tougher, Mobile-Friendly",
+      "features": [
+        "Mobile: filters now open in a slide-up panel instead of hiding below the page, and the top bar fits every phone size",
+        "Soccer live scores finally work — game-day scores and rank badges for Sun Devil Soccer",
+        "Live tab is much faster and stays snappy during tournaments",
+        "Push notifications show game times in YOUR timezone with exact minutes-to-start, and score updates no longer pile up",
+        "Game alerts are more reliable — subscriptions self-heal instead of silently breaking after a month",
+        "Every event now has a map pin, including the golf tournaments that were missing",
+        "Canceled games disappear from the schedule automatically after the nightly refresh",
+        "Under the hood: security hardening, per-visitor rate limiting, and smarter offline caching"
+      ]
+    },
+    {
       "version": "1.2.1",
       "date": "2026-06-17",
       "title": "Bug Fixes",

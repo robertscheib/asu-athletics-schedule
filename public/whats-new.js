@@ -1,5 +1,6 @@
 // whats-new.js — Version-gated release notes popup.
-// Self-contained: no dependencies on pwa.js or calendar.js.
+// Uses only `store` from shared.js (loaded first) — raw localStorage throws
+// in some private-browsing modes.
 
 function _wnIsNewer(a, b) {
   const parse = v => String(v).split('.').map(n => parseInt(n, 10) || 0);
@@ -19,7 +20,7 @@ function _wnFormatDate(iso) {
 
 function _wnDismiss(overlay, currentVersion) {
   overlay.classList.remove('wn-open');
-  localStorage.setItem('lastSeenVersion', currentVersion);
+  store.set('lastSeenVersion', currentVersion);
   setTimeout(() => overlay.remove(), 300);
 }
 
@@ -92,10 +93,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!releases.length) return;
 
   const currentVersion = releases[0].version;
-  const lastSeen = localStorage.getItem('lastSeenVersion');
+  const lastSeen = store.get('lastSeenVersion');
 
   if (!lastSeen) {
-    localStorage.setItem('lastSeenVersion', currentVersion);
+    store.set('lastSeenVersion', currentVersion);
     return;
   }
 

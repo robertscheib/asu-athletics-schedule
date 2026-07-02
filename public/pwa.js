@@ -43,7 +43,9 @@ function _initDebugPanel() {
   _pwaLog('log', `endpoint: ${store.get('asu-push-endpoint') || 'null'}`);
   _pwaLog('log', `standalone: ${window.navigator.standalone ?? 'n/a'}`);
   _pwaLog('log', `SW: ${navigator.serviceWorker?.controller ? 'active' : 'none'}`);
-  _pwaLog('log', `permission: ${Notification?.permission ?? 'n/a'}`);
+  // typeof guard everywhere: iOS Safari tabs have no Notification global, and
+  // even `Notification?.` throws ReferenceError on an undeclared identifier.
+  _pwaLog('log', `permission: ${typeof Notification !== 'undefined' ? Notification.permission : 'n/a'}`);
 }
 
 // ── Push subscription state ───────────────────────────────────────────────────
@@ -55,7 +57,7 @@ window.getPushEndpoint = () => store.get(PUSH_ENDPOINT_KEY) || null;
 
 async function _initPushSubscription() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  if (Notification.permission !== 'granted') return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
   try {
     _swRegistration = await navigator.serviceWorker.ready;
@@ -70,13 +72,15 @@ async function _initPushSubscription() {
     }
     const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh'))));
     const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth'))));
-    if (store.get(PUSH_ENDPOINT_KEY) === sub.endpoint) return;
 
-    const sportPrefs = _getSportPrefs();
+    // Always (re-)register with the server — no skip-if-known-endpoint check.
+    // Skipping is what stranded devices whose server row disappeared: the
+    // client believed it was registered and every bell action 409'd forever.
+    // One small POST per page load buys a self-healing subscription.
     await fetch('/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: sub.endpoint, p256dh, auth, sportPrefs }),
+      body: JSON.stringify({ endpoint: sub.endpoint, p256dh, auth }),
     });
     store.set(PUSH_ENDPOINT_KEY, sub.endpoint);
 
@@ -94,16 +98,6 @@ function _urlBase64ToUint8Array(base64String) {
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base64);
   return Uint8Array.from(raw, c => c.charCodeAt(0));
-}
-
-// ── Sport preferences ─────────────────────────────────────────────────────────
-
-function _getSportPrefs() {
-  return store.getJSON('asu-sport-prefs', null);
-}
-
-function _saveSportPrefs(prefs) {
-  store.setJSON('asu-sport-prefs', prefs);
 }
 
 // ── Bell icon state ───────────────────────────────────────────────────────────
@@ -218,13 +212,22 @@ function _closeBellMenu() {
   _activeBellEl = null;
 }
 
-async function _applyBellTypes(endpoint, eventId, types, bellEl) {
+async function _applyBellTypes(endpoint, eventId, types, bellEl, isRetry = false) {
   try {
     const res = await fetch('/api/subscribe/game', {
       method: types.length ? 'POST' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint, eventId, types }),
     });
+    // 409 = the server no longer knows this device (e.g. DB restored from a
+    // copy). Re-register the push subscription and retry once.
+    if (res.status === 409 && !isRetry) {
+      store.remove(PUSH_ENDPOINT_KEY);
+      await _initPushSubscription();
+      const fresh = window.getPushEndpoint();
+      if (fresh) return _applyBellTypes(fresh, eventId, types, bellEl, true);
+      throw new Error('re-register failed');
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     if (types.length) { _gameSubscriptions.set(eventId, types); }
@@ -365,10 +368,13 @@ function _renderInstallSection() {
 function _renderNotifSection() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
+  // No Notification global (iOS Safari tab) → notifications are impossible
+  // in-browser; skip the section entirely (the install section covers iOS).
+  if (typeof Notification === 'undefined') return;
 
   document.getElementById('notif-section')?.remove();
 
-  const perm = Notification?.permission ?? 'default';
+  const perm = Notification.permission ?? 'default';
   const section = document.createElement('div');
   section.className = 'filter-group';
   section.id = 'notif-section';
@@ -389,58 +395,14 @@ function _renderNotifSection() {
     return;
   }
 
-  const sportPrefs = _getSportPrefs();
-  const allChecked = !sportPrefs;
-  const knownSports = [
-    "Football", "Men's Basketball", "Women's Basketball",
-    "Baseball", "Softball", "Soccer",
-    "Swimming & Diving", "Track and Field", "Golf (Men's)", "Golf (Women's)",
-    "Tennis (Men's)", "Tennis (Women's)", "Wrestling", "Gymnastics",
-  ];
-  const sportsHtml = knownSports.map(s => {
-    const checked = allChecked || sportPrefs?.includes(s);
-    return `<label class="notif-sport-row"><input type="checkbox" value="${s}" ${checked ? 'checked' : ''} onchange="window._onSportPrefChange()"> ${s}</label>`;
-  }).join('');
-
+  // No per-sport checkboxes here: sport_prefs was never read server-side —
+  // the checkboxes were a dead control implying broadcast alerts that don't
+  // exist. Alerts are per-game via the 🔔 bell; say so instead.
   section.innerHTML = `
-    <label class="group-label">Notifications <span style="font-size:0.7rem;font-weight:400;opacity:0.7">(granted)</span></label>
-    <label class="notif-sport-row notif-all-row">
-      <input type="checkbox" id="notif-all" ${allChecked ? 'checked' : ''} onchange="window._onNotifAllChange(this)"> All sports
-    </label>
-    <div id="notif-sport-list" style="${allChecked ? 'display:none' : ''}">${sportsHtml}</div>
+    <label class="group-label">Notifications <span style="font-size:0.7rem;font-weight:400;opacity:0.7">(enabled)</span></label>
+    <p class="install-benefit">Tap the 🔔 bell on any game to pick alerts: game start, score updates, final score.</p>
   `;
   sidebar.appendChild(section);
-}
-
-window._onNotifAllChange = function(checkbox) {
-  const listEl = document.getElementById('notif-sport-list');
-  if (checkbox.checked) {
-    if (listEl) listEl.style.display = 'none';
-    _saveSportPrefs(null);
-    _postSportPrefs(null);
-  } else {
-    if (listEl) listEl.style.display = '';
-  }
-};
-
-window._onSportPrefChange = function() {
-  const allBox = document.getElementById('notif-all');
-  if (allBox) allBox.checked = false;
-  const checked = [...document.querySelectorAll('#notif-sport-list input[type=checkbox]:checked')].map(i => i.value);
-  _saveSportPrefs(checked);
-  _postSportPrefs(checked);
-};
-
-async function _postSportPrefs(prefs) {
-  const endpoint = window.getPushEndpoint();
-  if (!endpoint) return;
-  try {
-    await fetch('/api/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, p256dh: '', auth: '', sportPrefs: prefs }),
-    });
-  } catch {}
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -475,7 +437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (Notification?.permission === 'granted') {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     _swRegistration = _swRegistration || (await navigator.serviceWorker.ready.catch(() => null));
     await _initPushSubscription();
   }

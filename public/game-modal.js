@@ -6,10 +6,12 @@
 // ── Game Detail Modal (box score) ─────────────────────────────────────────────
 
 let _gmEscKey = null;
+let _gmPrevFocus = null;
 
 window.closeGameModal = function() {
   document.getElementById('game-modal-overlay')?.classList.remove('open');
   if (_gmEscKey) { document.removeEventListener('keydown', _gmEscKey); _gmEscKey = null; }
+  if (_gmPrevFocus?.focus) { _gmPrevFocus.focus(); _gmPrevFocus = null; }
 };
 
 window.switchGameTab = function(btn, panelId) {
@@ -32,6 +34,9 @@ window.openGameDetailModal = function(espnEventId, sport, fallback) {
 
   inner.innerHTML = '<div class="game-modal-spinner"></div>';
   overlay.classList.add('open');
+  // Basic dialog a11y: move focus in, restore on close (closeGameModal).
+  _gmPrevFocus = document.activeElement;
+  overlay.querySelector('.game-modal-close')?.focus();
 
   if (!espnEventId) {
     _gmRenderFallback(inner, fallback);

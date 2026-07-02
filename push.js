@@ -4,8 +4,9 @@ const { opponentFromTitle } = require('./lib/opponent');
 const { SITE_ORIGIN } = require('./lib/constants');
 const { SPORT_EMOJI } = require('./lib/sports-config');
 
-// VAPID env may be loaded after this module (loadSecretsFallback runs in the
-// entry point), so details are applied per-send rather than at require time.
+// VAPID details are applied per-send rather than at require time so a missing
+// key surfaces as a caught send error, not a boot failure (scheduler.js
+// eager-requires this module).
 function ensureVapid() {
   webpush.setVapidDetails(
     process.env.VAPID_SUBJECT || 'mailto:admin@example.com',
@@ -16,20 +17,23 @@ function ensureVapid() {
 
 function buildPayload(event) {
   const emoji = SPORT_EMOJI[event.sport] || '🏟️';
-  const opponent = (event.title || '').replace(/^.*?(?:at|vs\.?)\s+/i, '').trim() || 'Opponent';
-  const timeStr = event.start_date
-    ? new Date(event.start_date * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    : '';
+  const opponent = opponentFromTitle(event.title, { fallback: 'Opponent' });
   const venue = event.location_name || '';
 
+  // No time string here: the server's timezone is not the recipient's.
+  // startTime rides along as a raw epoch and sw.js renders it in the
+  // device's local timezone at display time (with the exact lead minutes —
+  // the send window is 0–20 min out, so a fixed "in 15 min" was wrong too).
   return {
     web_push: 8030,
+    startTime: event.start_date || null,
     notification: {
-      title: `${emoji} ASU vs ${opponent} — Starting in 15 min`,
-      body: [venue, timeStr ? `Kickoff at ${timeStr}` : ''].filter(Boolean).join(' · '),
+      title: `${emoji} ASU vs ${opponent} — starting soon`,
+      body: venue,
       icon: '/icons/icon-192.png',
       navigate: SITE_ORIGIN,
       app_badge: '1',
+      tag: `asu-start-${event.id}`,
     },
   };
 }
@@ -97,6 +101,8 @@ async function sendGameFinalAlert(eventId) {
       icon: '/icons/icon-192.png',
       navigate: SITE_ORIGIN,
       app_badge: '0',
+      // Same tag as this game's score updates: the final replaces the last one.
+      tag: `asu-game-${eventId}`,
     },
   });
 
@@ -144,7 +150,9 @@ async function sendScoreUpdateAlert(change, subscribers) {
 
   const payload = JSON.stringify({
     web_push: 8030,
-    notification: { title, body, icon: '/icons/icon-192.png', navigate: SITE_ORIGIN },
+    // Per-game tag: successive score updates replace each other instead of
+    // stacking, and the final-score alert (same tag) replaces the last one.
+    notification: { title, body, icon: '/icons/icon-192.png', navigate: SITE_ORIGIN, tag: `asu-game-${change.eventId}` },
   });
 
   let sent = 0;
