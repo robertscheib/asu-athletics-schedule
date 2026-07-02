@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asu-cal-v17';
+const CACHE_NAME = 'asu-cal-v18';
 const OFFLINE_CHANNEL = 'asu-offline';
 
 // JS and CSS files are loaded with versioned query params (e.g. live.js?v=22).
@@ -100,13 +100,16 @@ async function cacheFirst(request) {
 
 async function networkFirstWithFallback(request) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2000);
+  // 4s: through CF Access + tunnel a cold request can exceed 2s — aborting
+  // that early showed the offline banner to users who were never offline.
+  const timer = setTimeout(() => controller.abort(), 4000);
   try {
     const response = await fetch(request, { signal: controller.signal });
     clearTimeout(timer);
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
       cache.put(request, response.clone());
+      _notifyOnline();
       return response;
     }
     throw new Error(`HTTP ${response.status}`);
@@ -128,9 +131,21 @@ async function networkFirstWithFallback(request) {
 }
 
 function _notifyOffline() {
+  _postToClients('offline');
+}
+
+// Recovery signal: the window 'online' event never fires when the "offline"
+// state came from a slow/failed fetch rather than real connectivity loss —
+// the banner used to stick around forever. Any successful network-first
+// response clears it.
+function _notifyOnline() {
+  _postToClients('online');
+}
+
+function _postToClients(type) {
   self.clients.matchAll({ type: 'window' }).then(clients => {
     for (const client of clients) {
-      client.postMessage({ type: 'offline' });
+      client.postMessage({ type });
     }
   });
 }

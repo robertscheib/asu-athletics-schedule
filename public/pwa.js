@@ -325,16 +325,25 @@ function _initOfflineBanner() {
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.addEventListener('message', event => {
     if (event.data?.type === 'offline') _showOfflineBanner();
+    // SW posts 'online' on any successful API response — the window 'online'
+    // event alone never fires when the banner came from a slow fetch.
+    if (event.data?.type === 'online') _hideOfflineBanner();
   });
   window.addEventListener('online', _hideOfflineBanner);
 }
+
+let _offlineBannerTimer = null;
 
 function _showOfflineBanner() {
   if (document.getElementById('offline-banner')) return;
   const bar = document.createElement('div');
   bar.id = 'offline-banner';
   bar.textContent = "You're offline — showing cached schedule. Live scores unavailable.";
-  document.body.prepend(bar);
+  document.body.appendChild(bar); // fixed overlay — never in layout flow
+  // Belt-and-braces: self-dismiss; a still-offline session will re-show it
+  // on the next failed fetch anyway.
+  clearTimeout(_offlineBannerTimer);
+  _offlineBannerTimer = setTimeout(_hideOfflineBanner, 10_000);
 }
 
 function _hideOfflineBanner() {
