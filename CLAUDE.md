@@ -23,6 +23,14 @@ git tag (see `## Deploy / Promotion` below). Both run the same code; the schedul
   (on-box cloudflared) — do NOT set TRUST_PROXY_HOPS there.
 - **Service**: `asu-cal.service` (User=ubuntu, ExecStart=`/usr/bin/node server.js`) — runs the scheduler
 - **Public path**: dedicated `cloudflared` tunnel **on the box** (`asu-oracle`, id `56683813-ed64-4029-a2d1-fe03a96b8ebc`) → `localhost:3000`. systemd `cloudflared.service`. asu CNAME → `<that-id>.cfargotunnel.com`. **No home dependency.** Rollback: repoint asu CNAME to the HA tunnel `ea5427e8-…cfargotunnel.com` (its asu→NPM ingress is kept as a fallback).
+  ⚠ **Split-DNS gotcha (fixed 2026-07-02)**: the Pi-holes' shared `host-record`/`local=`
+  dnsmasq lines (pihole.toml, both .30/.32) used to include `asu.dikaiaserver.com → 10.10.1.40`
+  (NPM) — a pre-migration leftover that silently routed every home-LAN client to the DEV box
+  while cellular/outside users got Oracle (split-brain: LAN push subscriptions landed in dev's
+  DB where the scheduler is off). Removed from both Pi-holes (backups:
+  `pihole.toml.bak-20260702-asu`). Do NOT re-add while prod lives on Oracle; the NPM asu proxy
+  host + HA-tunnel ingress remain as the dormant rollback path only. When testing "prod" from
+  home WiFi, `curl /api/version` first to confirm which box you're on.
 
 ### Dev — Ubuntu VM (`asu-dev.dikaiaserver.com`, CF Access-gated)
 - **Host**: Ubuntu VM at 10.10.1.19, port 3000 (Claude Code runs here)
@@ -153,6 +161,14 @@ tag NOT cut yet).** Before cutting the v1.3.0 tag + prod deploy: real-device pas
 Robert's phone (Safari tab, installed-PWA v13→v17 SW update, filter sheet feel, push test);
 prod ADMIN_TOKEN into Oracle secrets.env (no TRUST_PROXY_HOPS there; verify VAPID present);
 watch a live-game day on dev.
+
+**Infra incident (2026-07-02, resolved):** Robert saw the new UI on the *prod* URL but not
+asu-dev — root cause was the split-DNS leftover documented in `## Environment` above (LAN →
+dev box on the prod hostname). Pi-hole records removed + verified (LAN now gets Oracle 1.2.1).
+asu-dev's stale look was the phone PWA's old SW cache; it self-updates on a fresh load.
+Home-WiFi push subscriptions created during the split-brain sit in dev's DB (scheduler off →
+no pushes); once v1.3.0 deploys to prod, the Group-4 self-healing re-register recreates them
+in Oracle's DB on each user's next visit.
 
 **Open / not yet verified (needs a real device):** authenticated `asu-dev` page render; PWA
 install + push on prod from a phone; full reboot-recovery test of the Oracle box.
